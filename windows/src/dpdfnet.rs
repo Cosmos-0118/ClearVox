@@ -1,0 +1,164 @@
+//! DPDFNet speech enhancement (Ceva, Apache-2.0): a causal, streaming, 48 kHz full-band model
+//! derived from DeepFilterNet2, run with the pure-Rust `tract` ONNX engine.
+//!
+//! The ONNX graph takes one STFT frame (960-sample Vorbis window, 480 hop, 481 bins as re/im) plus a
+//! recurrent state vector and returns the enhanced frame plus the next state. We do the STFT /
+//! overlap-add ourselves, exactly like the reference Python `StreamEnhancer`.
+
+use realfft::num_complex::Complex;
+use realfft::{ComplexToReal, RealFftPlanner, RealToComplex};
+use std::f32::consts::PI;
+use std::sync::Arc;
+use anyhow::{anyhow, bail};
+use tract_onnx::prelude::*;
+
+type Result<T> = anyhow::Result<T>;
+
+pub const HOP: usize = 480;
+const WIN: usize = 960;
+const BINS: usize = WIN / 2 + 1;
+
+/// Which size of the model to run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Size {
+    /// DPDFNet-2: light on CPU.
+    Two,
+    /// DPDFNet-8: a little cleaner, ~2x the CPU.
+    Eight,
+}
+
+fn model_bytes(size: Size) -> &'static [u8] {
+    match size {
+        Size::Two => include_bytes!("../models/dpdfnet2_48khz_hr.onnx"),
+        Size::Eight => include_bytes!("../models/dpdfnet8_48khz_hr.onnx"),
+    }
+}
+
+type Plan = TypedRunnableModel;
+
+pub struct Dpdfnet {
+    plan: Arc<Plan>,
+    init_state: Vec<f32>,
+    state: Tensor,
+    window: [f32; WIN],
+    fwd: Arc<dyn RealToComplex<f32>>,
+    inv: Arc<dyn ComplexToReal<f32>>,
+    prev: [f32; HOP],
+    ola: [f32; WIN],
+    scratch_in: Vec<f32>,
+    spec: Vec<Complex<f32>>,
+    time: Vec<f32>,
+}
+
+impl Dpdfnet {
+    pub fn new(size: Size) -> Result<Self> {
+        let bytes = model_bytes(size);
+        let proto = tract_onnx::onnx().proto_model_for_read(&mut &bytes[..])?;
+        let meta = |key: &str| -> Result<String> {
+            proto
+                .metadata_props
+                .iter()
+                .find(|e| e.key == key)
+                .map(|e| e.value.clone())
+                .ok_or_else(|| anyhow!("model metadata '{key}' missing"))
+        };
+        let floats = |s: String| -> Result<Vec<f32>> {
+            s.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| e.into())).collect()
+        };
+        let state_size: usize = meta("state_size")?.parse()?;
+        let erb_n: usize = meta("erb_norm_state_size")?.parse()?;
+        let spec_n: usize = meta("spec_norm_state_size")?.parse()?;
+        let erb_init = floats(meta("erb_norm_init")?)?;
+        let spec_init = floats(meta("spec_norm_init")?)?;
+        if erb_init.len() != erb_n || spec_init.len() != spec_n || erb_n + spec_n > state_size {
+            bail!("inconsistent DPDFNet state metadata");
+        }
+        let mut init_state = vec![0.0f32; state_size];
+        init_state[..erb_n].copy_from_slice(&erb_init);
+        init_state[erb_n..erb_n + spec_n].copy_from_slice(&spec_init);
+
+        let plan = tract_onnx::onnx().model_for_proto_model(&proto)?.into_optimized()?.into_runnable()?;
+
+        let mut window = [0.0f32; WIN];
+        for (i, w) in window.iter_mut().enumerate() {
+            let s = (0.5 * PI * (i as f32 + 0.5) / (WIN as f32 / 2.0)).sin();
+            *w = (0.5 * PI * s * s).sin();
+        }
+        let mut planner = RealFftPlanner::<f32>::new();
+        let fwd = planner.plan_fft_forward(WIN);
+        let inv = planner.plan_fft_inverse(WIN);
+        let state = tensor1(&init_state);
+        Ok(Self {
+            plan,
+            init_state,
+            state,
+            window,
+            fwd,
+            inv,
+            prev: [0.0; HOP],
+            ola: [0.0; WIN],
+            scratch_in: vec![0.0; WIN],
+            spec: vec![Complex::new(0.0, 0.0); BINS],
+            time: vec![0.0; WIN],
+        })
+    }
+
+    /// Back to a clean stream (used when the denoiser is re-enabled after a long gap).
+    pub fn reset(&mut self) {
+        self.state = tensor1(&self.init_state);
+        self.prev = [0.0; HOP];
+        self.ola = [0.0; WIN];
+    }
+
+    /// Enhances one 10 ms hop. The output lags the input by one hop (10 ms).
+    pub fn process(&mut self, input: &[f32; HOP], output: &mut [f32; HOP]) -> Result<()> {
+        self.scratch_in[..HOP].copy_from_slice(&self.prev);
+        self.scratch_in[HOP..].copy_from_slice(input);
+        self.prev = *input;
+        for i in 0..WIN {
+            self.scratch_in[i] *= self.window[i];
+        }
+        self.fwd.process(&mut self.scratch_in, &mut self.spec).map_err(|e| anyhow!("fft: {e}"))?;
+        let mut flat = Vec::with_capacity(BINS * 2);
+        for c in &self.spec {
+            flat.push(c.re);
+            flat.push(c.im);
+        }
+        let ri = tract_ndarray::Array4::from_shape_vec((1, 1, BINS, 2), flat)?.into_tensor();
+        let state = std::mem::replace(&mut self.state, Tensor::zero::<f32>(&[1])?);
+        let mut outs = self.plan.run(tvec!(ri.into_tvalue(), state.into_tvalue()))?;
+        let next_state = outs.pop().ok_or_else(|| anyhow!("no state output"))?;
+        let spec_e = outs.pop().ok_or_else(|| anyhow!("no spec output"))?;
+        self.state = next_state.into_tensor();
+        let spec_e = spec_e.into_tensor();
+        let view = spec_e.to_plain_array_view::<f32>()?;
+        if view.len() != BINS * 2 {
+            bail!("unexpected DPDFNet output size {}", view.len());
+        }
+        let mut it = view.iter();
+        for c in self.spec.iter_mut() {
+            let (re, im) = (*it.next().unwrap(), *it.next().unwrap());
+            *c = Complex::new(re, im);
+        }
+        // The inverse FFT needs real DC/Nyquist bins.
+        self.spec[0].im = 0.0;
+        self.spec[BINS - 1].im = 0.0;
+        self.inv.process(&mut self.spec, &mut self.time).map_err(|e| anyhow!("ifft: {e}"))?;
+        let norm = 1.0 / WIN as f32;
+        for i in 0..WIN {
+            self.ola[i] += self.time[i] * norm * self.window[i];
+        }
+        output.copy_from_slice(&self.ola[..HOP]);
+        self.ola.copy_within(HOP.., 0);
+        self.ola[WIN - HOP..].fill(0.0);
+        if output.iter().any(|s| !s.is_finite()) {
+            output.fill(0.0);
+            self.reset();
+        }
+        Ok(())
+    }
+}
+
+fn tensor1(v: &[f32]) -> Tensor {
+    tract_ndarray::Array1::from_vec(v.to_vec()).into_tensor()
+}

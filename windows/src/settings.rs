@@ -15,8 +15,8 @@ pub struct Settings {
     pub highpass: bool,
     pub limiter: bool,
     pub agc: bool,
-    /// Use DeepFilterNet instead of RNNoise (only in builds with the `dfn` feature).
-    pub deepfilter: bool,
+    /// Denoiser: "dpdfnet8" (best, default), "dpdfnet2" (lighter) or "rnnoise" (minimal).
+    pub engine: String,
     pub use_as_default: bool,
     /// Default capture device before ClearVox took over, so it can be restored.
     pub previous_default_input_id: String,
@@ -32,7 +32,7 @@ impl Default for Settings {
             highpass: true,
             limiter: true,
             agc: true,
-            deepfilter: false,
+            engine: "dpdfnet8".into(),
             use_as_default: true,
             previous_default_input_id: String::new(),
         }

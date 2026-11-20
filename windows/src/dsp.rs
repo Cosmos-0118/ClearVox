@@ -1,9 +1,10 @@
-//! Voice DSP chain: high-pass -> RNNoise -> gate -> auto gain -> peak limiter.
+//! Voice DSP chain: high-pass -> DPDFNet / RNNoise -> gate -> auto gain -> peak limiter.
 //!
 //! Everything runs on 48 kHz mono `f32` audio in [-1, 1] in blocks of [`FRAME`] (10 ms) samples,
 //! which is what RNNoise expects. The chain is stateful and streaming: feed it any number of
 //! samples and it returns whole frames as they become available.
 
+use crate::dpdfnet::{Dpdfnet, Size};
 use nnnoiseless::DenoiseState;
 use std::f32::consts::PI;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
@@ -15,40 +16,43 @@ pub const FRAME: usize = DenoiseState::FRAME_SIZE; // 480 samples = 10 ms
 /// Which neural denoiser runs inside the chain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Engine {
-    /// RNNoise: tiny and fast.
+    /// RNNoise: tiny and fast, but it garbles speech under loud, close noise such as a fan.
     Rnnoise,
-    /// DeepFilterNet3: stronger on non-stationary noise, needs the `dfn` build feature.
-    DeepFilter,
+    /// DPDFNet-2: clean voice, light on the CPU.
+    Dpdfnet2,
+    /// DPDFNet-8: smoother, fewer artifacts, about twice the CPU of DPDFNet-2. The default.
+    Dpdfnet8,
 }
 
 impl Engine {
-    pub fn available(self) -> bool {
-        match self {
-            Engine::Rnnoise => true,
-            Engine::DeepFilter => cfg!(feature = "dfn"),
+    pub fn from_name(s: &str) -> Option<Engine> {
+        match s {
+            "rnnoise" | "light" => Some(Engine::Rnnoise),
+            "dpdfnet2" | "balanced" | "studio" => Some(Engine::Dpdfnet2),
+            "dpdfnet8" | "best" => Some(Engine::Dpdfnet8),
+            _ => None,
         }
     }
 }
 
 enum Denoiser {
     Rnn(Box<DenoiseState<'static>>),
-    #[cfg(feature = "dfn")]
-    Dfn(Box<df::tract::DfTract>),
+    Dpd(Box<Dpdfnet>),
 }
 
 impl Denoiser {
     fn new(engine: Engine) -> Self {
-        match engine {
-            #[cfg(feature = "dfn")]
-            Engine::DeepFilter => {
-                let rp = df::tract::RuntimeParams::default_with_ch(1);
-                match df::tract::DfTract::new(df::tract::DfParams::default(), &rp) {
-                    Ok(m) => return Denoiser::Dfn(Box::new(m)),
-                    Err(_) => {} // fall back to RNNoise
-                }
+        let size = match engine {
+            Engine::Rnnoise => return Denoiser::Rnn(DenoiseState::new()),
+            Engine::Dpdfnet2 => Size::Two,
+            Engine::Dpdfnet8 => Size::Eight,
+        };
+        match Dpdfnet::new(size) {
+            Ok(m) => Denoiser::Dpd(Box::new(m)),
+            Err(e) => {
+                log::error!("DPDFNet failed to load ({e}); falling back to RNNoise");
                 Denoiser::Rnn(DenoiseState::new())
             }
-            _ => Denoiser::Rnn(DenoiseState::new()),
         }
     }
 
@@ -66,17 +70,15 @@ impl Denoiser {
                 }
                 vad
             }
-            #[cfg(feature = "dfn")]
-            Denoiser::Dfn(m) => {
-                let noisy = ndarray::ArrayView2::from_shape((1, FRAME), input).unwrap();
-                let mut enh = ndarray::ArrayViewMut2::from_shape((1, FRAME), output).unwrap();
-                match m.process(noisy, enh.view_mut()) {
-                    Ok(lsnr) => ((lsnr + 5.0) / 20.0).clamp(0.0, 1.0),
-                    Err(_) => {
-                        output.copy_from_slice(input);
-                        0.5
-                    }
+            Denoiser::Dpd(m) => {
+                if m.process(input, output).is_err() {
+                    output.copy_from_slice(input);
+                    return 0.5;
                 }
+                // The model has no VAD, but it leaves almost nothing between words, so output energy
+                // is a good "someone is speaking" signal for the auto gain.
+                let rms = (output.iter().map(|s| s * s).sum::<f32>() / FRAME as f32).sqrt();
+                ((rms - 0.001) / 0.002).clamp(0.0, 1.0)
             }
         }
     }
@@ -183,34 +185,56 @@ impl Limiter {
     }
 }
 
-/// Slow automatic level control, only adapting while RNNoise says someone is speaking.
+/// Automatic level control that only adapts while someone is speaking. It follows a ~50 ms
+/// loudness estimate: it lifts quiet words within a fraction of a second and eases loud ones down
+/// faster, so soft word endings don't sink below the rest of the sentence.
 struct Agc {
     gain: f32,
+    lift: f32,  // fast extra boost (1..=LIFT_MAX) for words that dip below their neighbours
+    power: f32, // smoothed frame power
 }
 
 impl Agc {
-    const TARGET_RMS: f32 = 0.08; // about -22 dBFS
-    const MAX_GAIN: f32 = 4.0; // +12 dB
+    const TARGET_RMS: f32 = 0.09; // about -21 dBFS
+    const MAX_GAIN: f32 = 8.0; // +18 dB: neural denoisers take ~10 dB off a voice buried in noise
     const MIN_GAIN: f32 = 0.35; // -9 dB
+    const MIN_RMS: f32 = 0.0015; // about -56 dBFS: below this it's residue, not speech
+    const LIFT_MAX: f32 = 2.0; // +6 dB
 
     fn new() -> Self {
-        Self { gain: 1.0 }
+        Self { gain: 1.0, lift: 1.0, power: 0.0 }
     }
 
-    /// Updates the gain and returns the gain this frame starts from (it ramps to `self.gain`).
+    /// The gain applied at the end of the last frame.
+    fn eff(&self) -> f32 {
+        self.gain * self.lift
+    }
+
+    /// Updates the gain and returns the gain this frame starts from (it ramps to `eff()`).
     fn update(&mut self, frame: &[f32], vad: f32, enabled: bool) -> f32 {
-        let prev = self.gain;
-        if enabled && vad > 0.7 {
-            let rms = (frame.iter().map(|s| s * s).sum::<f32>() / frame.len() as f32).sqrt();
-            if rms > 0.003 {
+        let prev = self.eff();
+        let p = frame.iter().map(|s| s * s).sum::<f32>() / frame.len() as f32;
+        self.power += (p - self.power) * 0.4;
+        if enabled && vad > 0.5 {
+            let rms = self.power.sqrt();
+            if rms > Self::MIN_RMS {
                 let want = (Self::TARGET_RMS / rms).clamp(Self::MIN_GAIN, Self::MAX_GAIN);
-                // Cut quickly (loud talker), boost slowly.
-                let k = if want < self.gain { 0.15 } else { 0.01 };
+                // Cut quickly (loud talker), boost over a few tenths of a second.
+                let k = if want < self.gain { 0.2 } else { 0.04 };
                 self.gain += (want - self.gain) * k;
             }
         } else if !enabled {
             self.gain += (1.0 - self.gain) * 0.1;
         }
+        // Quiet word endings and soft syllables: lift them within ~40 ms, let go within ~100 ms.
+        let frame_rms = p.sqrt();
+        let want_lift = if enabled && vad > 0.5 && frame_rms > Self::MIN_RMS {
+            (Self::TARGET_RMS * 0.7 / (frame_rms * self.gain)).clamp(1.0, Self::LIFT_MAX)
+        } else {
+            1.0
+        };
+        let k = if want_lift > self.lift { 0.25 } else { 0.1 };
+        self.lift += (want_lift - self.lift) * k;
         prev
     }
 }
@@ -357,7 +381,7 @@ impl Chain {
         }
 
         let a0 = self.agc.update(f, if dn_on { vad } else { 1.0 }, agc_on);
-        let a1 = self.agc.gain;
+        let a1 = self.agc.eff();
         let mut peak = 0.0f32;
         for i in 0..FRAME {
             let t = (i + 1) as f32 / FRAME as f32;

@@ -176,7 +176,7 @@ git tag v1.0.0 && git push origin v1.0.0
 
 ### Windows
 
-See [`windows/README.md`](windows/README.md). Rust, WASAPI, RNNoise / DeepFilterNet.
+See [`windows/README.md`](windows/README.md). Rust, WASAPI, DPDFNet (with RNNoise as the light fallback).
 
 ---
 

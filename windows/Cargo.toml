@@ -3,7 +3,6 @@ name = "clearvox"
 version = "0.1.0"
 edition = "2021"
 description = "Studio-clean voice for Discord, Zoom and games on Windows"
-license = "MIT"
 
 [dependencies]
 nnnoiseless = { version = "0.5", default-features = false }
@@ -17,24 +16,7 @@ winreg = "0.56"
 anyhow = "1"
 log = "0.4"
 windows-core = "0.62"
-
-[features]
-default = []
-# Stronger neural denoiser (DeepFilterNet3 via tract) instead of RNNoise. Larger binary, more CPU.
-dfn = ["dep:deep_filter", "dep:ndarray"]
-
-[dependencies.deep_filter]
-git = "https://github.com/Rikorose/DeepFilterNet"
-tag = "v0.5.6"
-default-features = false
-features = ["tract", "default-model"]
-optional = true
-
-[dependencies.ndarray]
-version = "0.15"
-optional = true
-
-[dev-dependencies]
+tract-onnx = "0.23"
 realfft = "3"
 
 [dependencies.windows]

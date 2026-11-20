@@ -208,7 +208,7 @@ impl App {
             input_id: if self.st.input_id.is_empty() { None } else { Some(self.st.input_id.clone()) },
             output_id: self.st.output_id.clone(),
             params: self.params.clone(),
-            engine: if self.st.deepfilter && dsp::Engine::DeepFilter.available() { dsp::Engine::DeepFilter } else { dsp::Engine::Rnnoise },
+            engine: dsp::Engine::from_name(&self.st.engine).unwrap_or(dsp::Engine::Dpdfnet8),
             source_samples: None,
         };
         match Pipeline::start(cfg) {
@@ -356,8 +356,8 @@ impl App {
                 self.params.denoise.store(self.st.denoise, Relaxed);
                 self.save();
             }
-            "opt:deepfilter" => {
-                self.st.deepfilter = !self.st.deepfilter;
+            id if id.starts_with("engine:") => {
+                self.st.engine = id["engine:".len()..].to_string();
                 self.save();
                 self.restart_if_running();
             }
@@ -449,9 +449,16 @@ impl App {
 
         let opt = |id: &str, text: &str, on: bool| CheckMenuItem::with_id(id, text, true, on, None);
         let _ = menu.append(&opt("opt:denoise", "Noise Suppression", self.st.denoise));
-        if dsp::Engine::DeepFilter.available() {
-            let _ = menu.append(&opt("opt:deepfilter", "Stronger Suppression (beta)", self.st.deepfilter));
+        let eng = Submenu::new("Voice Engine", true);
+        let cur = dsp::Engine::from_name(&self.st.engine).unwrap_or(dsp::Engine::Dpdfnet8);
+        for (id, label, e) in [
+            ("dpdfnet8", "Best quality (DPDFNet-8)", dsp::Engine::Dpdfnet8),
+            ("dpdfnet2", "Lighter on CPU (DPDFNet-2)", dsp::Engine::Dpdfnet2),
+            ("rnnoise", "Minimal (RNNoise, weakest)", dsp::Engine::Rnnoise),
+        ] {
+            let _ = eng.append(&CheckMenuItem::with_id(format!("engine:{id}"), label, true, cur == e, None));
         }
+        let _ = menu.append(&eng);
         let _ = menu.append(&opt("opt:highpass", "Reduce Air Thumps", self.st.highpass));
         let _ = menu.append(&opt("opt:limiter", "Peak Limiter", self.st.limiter));
         let _ = menu.append(&opt("opt:agc", "Auto Gain", self.st.agc));

@@ -78,7 +78,7 @@ try {
         if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { Die 'Building from source needs Rust: https://rustup.rs' }
         Write-Host 'Building from source (this takes a few minutes the first time) ...'
         Push-Location (Join-Path $here 'windows')
-        try { cargo build --release --features dfn; if ($LASTEXITCODE -ne 0) { Die 'Build failed.' } } finally { Pop-Location }
+        try { cargo build --release; if ($LASTEXITCODE -ne 0) { Die 'Build failed.' } } finally { Pop-Location }
         $localExe = Join-Path $here 'windows\target\release\clearvox.exe'
     } else {
         $base = "https://github.com/$Repo/releases/latest/download"

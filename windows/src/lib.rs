@@ -1,6 +1,7 @@
 pub mod app;
 pub mod defaultmic;
 pub mod devices;
+pub mod dpdfnet;
 pub mod dsp;
 pub mod icon;
 pub mod pipeline;

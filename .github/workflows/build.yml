@@ -29,8 +29,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: windows
-      - name: Build (RNNoise + DeepFilterNet)
-        run: cargo build --release --features dfn
+      - name: Build
+        run: cargo build --release
       - name: Unit tests
         run: cargo test --release --lib
       - name: Noise suppression tests (simulated noisy speech)

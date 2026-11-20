@@ -37,6 +37,7 @@ jobs:
           generate_release_notes: true
 
   windows:
+    needs: build
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +48,7 @@ jobs:
 
       - name: Build
         working-directory: windows
-        run: cargo build --release --features dfn
+        run: cargo build --release
 
       - name: Package
         shell: pwsh

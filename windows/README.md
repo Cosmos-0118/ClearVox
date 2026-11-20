@@ -7,8 +7,8 @@ room noise with a neural network, and sends the result to **VB-CABLE**, a free v
 Your chat apps use the cable's *CABLE Output* as their microphone.
 
 ```
-Mic ─► high-pass ─► RNNoise / DeepFilterNet ─► gate ─► auto gain ─► limiter ─► CABLE Input ─► (apps pick "CABLE Output")
-        WASAPI capture        (neural denoiser)                                  WASAPI render
+Mic ─► high-pass ─► DPDFNet (neural denoiser) ─► auto gain ─► limiter ─► CABLE Input ─► (apps pick "CABLE Output")
+        WASAPI capture                                                      WASAPI render
 ```
 
 ## Install
@@ -51,10 +51,10 @@ when off, amber on an error, and its microphone fills up as you speak.
 | **Microphone** | The real mic to clean up. |
 | **Virtual Mic** | Where cleaned audio goes (the *CABLE Input* playback device). |
 | **Noise Suppression** | The neural denoiser. Turn off to hear the difference. |
-| **Stronger Suppression (beta)** | DeepFilterNet3 instead of RNNoise (release builds). More CPU, tougher on non-stationary noise. |
+| **Voice Engine** | *Best quality* (DPDFNet-8, default, roughly half a CPU core), *Lighter on CPU* (DPDFNet-2) or *Minimal* (RNNoise: tiny, but it garbles speech under loud close noise such as a fan). |
 | **Reduce Air Thumps** | 90 Hz high-pass: rumble, desk bumps, breath pops. |
 | **Peak Limiter** | Stops sudden loud sounds clipping. |
-| **Auto Gain** | Evens out your level while you talk (up to +12 dB). |
+| **Auto Gain** | Evens out your level while you talk (up to +18 dB; quiet words are lifted so they do not sink). |
 | **Use as Default Mic** | Makes *CABLE Output* the Windows default recording device while ClearVox runs, so apps pick it automatically. Your real default is restored when you quit. |
 | **Open at Login** | Starts ClearVox when you sign in. |
 
@@ -96,8 +96,7 @@ C++"). Run commands from PowerShell, not Git Bash (Git's `link.exe` shadows MSVC
 
 ```powershell
 cd windows
-cargo build --release                  # RNNoise only, ~1.8 MB
-cargo build --release --features dfn   # + DeepFilterNet3, ~22 MB
+cargo build --release                  # ~45 MB: the DPDFNet models are compiled in
 cargo test --release --lib             # unit tests
 ```
 
@@ -113,8 +112,8 @@ CLI (the exe is a tray app; when started from a shell, pipe it, e.g. `| Out-Stri
 
 ```powershell
 clearvox.exe --list-devices
-clearvox.exe --selftest [--mic TEXT] [--file in.wav] [--seconds 8] [--dfn]
-clearvox.exe --process-file in.wav out.wav [--engine dfn] [--agc]
+clearvox.exe --selftest [--mic TEXT] [--file in.wav] [--seconds 8] [--engine dpdfnet2]
+clearvox.exe --process-file in.wav out.wav [--engine rnnoise|dpdfnet2|dpdfnet8] [--agc]
 clearvox.exe --restore-default
 ```
 
@@ -124,7 +123,10 @@ the whole path. `tests/analyze.py` compares loudness before/after for any pair o
 
 | File | Role |
 | --- | --- |
-| `src/dsp.rs` | High-pass, RNNoise/DeepFilterNet, gate, auto gain, limiter |
+| `src/dsp.rs` | High-pass, engine selection, gate (RNNoise only), auto gain, limiter |
+| `src/dpdfnet.rs` | DPDFNet streaming inference (STFT + `tract` ONNX) |
+| `models/` | The bundled DPDFNet ONNX models and their licence |
+| `tests/bench/` | Python scripts that compared candidate denoisers |
 | `src/pipeline.rs` | WASAPI capture → DSP → WASAPI render, feedback guard |
 | `src/ring.rs` | Bridges the mic and cable clocks |
 | `src/devices.rs` | Endpoint listing, "is this a virtual cable" rules |
@@ -136,5 +138,5 @@ the whole path. `tests/analyze.py` compares loudness before/after for any pair o
 
 - [VB-CABLE](https://vb-audio.com/Cable/) by VB-Audio, the virtual audio cable (donationware,
   installed separately, not bundled).
-- [RNNoise](https://github.com/xiph/rnnoise) via [nnnoiseless](https://github.com/jneem/nnnoiseless) (BSD-3-Clause).
-- [DeepFilterNet](https://github.com/Rikorose/DeepFilterNet) (MIT / Apache-2.0).
+- [RNNoise](https://github.com/xiph/rnnoise) via [nnnoiseless](https://github.com/jneem/nnnoiseless) (BSD-3-Clause), the light fallback engine.
+- [DPDFNet](https://github.com/ceva-ip/DPDFNet) by Ceva (Apache-2.0), a DeepFilterNet2-based speech enhancer, run with [tract](https://github.com/sonos/tract).

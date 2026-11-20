@@ -18,9 +18,16 @@ Usage:
         --out TEXT      use the virtual mic whose name contains TEXT
         --file WAV      feed a 48 kHz WAV instead of the microphone
         --seconds N     duration (default 8)
-        --no-denoise --no-gate --no-agc --dfn
-  clearvox.exe --process-file IN.wav OUT.wav [--no-denoise] [--no-gate] [--agc] [--hp HZ] [--engine dfn]
+        --no-denoise --no-gate --no-agc --engine rnnoise|dpdfnet2|dpdfnet8
+  clearvox.exe --process-file IN.wav OUT.wav [--no-denoise] [--no-gate] [--agc] [--hp HZ] [--engine rnnoise|dpdfnet2|dpdfnet8]
 ";
+
+fn parse_engine(args: &[String]) -> anyhow::Result<dsp::Engine> {
+    match arg_value(args, "--engine") {
+        None => Ok(dsp::Engine::Dpdfnet8),
+        Some(n) => dsp::Engine::from_name(n).ok_or_else(|| anyhow::anyhow!("unknown engine '{n}' (rnnoise, dpdfnet2, dpdfnet8)")),
+    }
+}
 
 /// GUI-subsystem exes have no console; attach to the parent shell's so CLI output is visible.
 fn attach_console() {
@@ -81,10 +88,7 @@ fn main() -> anyhow::Result<()> {
         let params = dsp::Params::new(!has("--no-denoise"), true, true, has("--agc"));
         params.gate.store(!has("--no-gate"), Relaxed);
         let hp = arg_value(&args, "--hp").and_then(|v| v.parse().ok()).unwrap_or(90.0);
-        let engine = if arg_value(&args, "--engine") == Some("dfn") { dsp::Engine::DeepFilter } else { dsp::Engine::Rnnoise };
-        if !engine.available() {
-            anyhow::bail!("this build has no DeepFilterNet (build with --features dfn)");
-        }
+        let engine = parse_engine(&args)?;
         wavio::write_mono_48k(Path::new(out), &dsp::process_buffer_engine(params, &input, hp, engine))?;
         return Ok(());
     }
@@ -158,7 +162,7 @@ fn selftest(args: &[String]) -> anyhow::Result<()> {
         input_id: mic.map(|d| d.id),
         output_id: out.id,
         params,
-        engine: if has("--dfn") { dsp::Engine::DeepFilter } else { dsp::Engine::Rnnoise },
+        engine: parse_engine(args)?,
         source_samples: source,
     })
     .map_err(|e| anyhow::anyhow!(e))?;
