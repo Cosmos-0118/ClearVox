@@ -2,10 +2,17 @@ import AppKit
 import Combine
 import SwiftUI
 
+/// Menu-bar-only app: no SwiftUI scenes (an empty `Settings` scene shows a blank "Settings" window).
 @main
-struct ClearVoxApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    var body: some Scene { Settings { EmptyView() } }
+enum ClearVoxApp {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.setActivationPolicy(.accessory)
+        app.run()
+        withExtendedLifetime(delegate) {}
+    }
 }
 
 /// Menu-bar item backed by a real NSMenu, laid out like the system Wi-Fi / Sound / Bluetooth menus:
