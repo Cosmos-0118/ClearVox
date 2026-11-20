@@ -79,6 +79,7 @@ final class Pipeline: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         refreshDevices()
         AudioDevices.observeChanges { [weak self] in self?.refreshDevices() }
+        AudioDevices.observeDefaultInput { [weak self] in self?.defaultInputChanged() }
 
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: nil) { [weak self] _ in
             guard let self else { return }
@@ -195,7 +196,7 @@ final class Pipeline: ObservableObject {
                 // BEFORE creating the engine: VPIO binds to whatever is default at creation, and
                 // binding to BlackHole would loop the virtual mic back into itself.
                 ignoreConfigUntil = Date().addingTimeInterval(2)
-                ensureRealDefault(preferred: cfg.inputID)
+                useAsSystemInput(cfg.inputID)
                 if let cur = AudioDevices.defaultInput(), AudioDevices.all().first(where: { $0.id == cur })?.isVirtualLoopback ?? false {
                     throw NSError(domain: "ClearVox", code: 3, userInfo: [NSLocalizedDescriptionKey:
                         "Voice Processing needs a real mic as the system input. Set Sound › Input to your microphone."])
@@ -333,6 +334,37 @@ final class Pipeline: ObservableObject {
             guard !self.playbackIsSafe() else { return }
             self.playback?.stop()
             DispatchQueue.main.async { self.restartIfRunning() }
+        }
+    }
+
+    /// macOS changes the default input on its own when a headset (AirPods, USB, Bluetooth) connects.
+    /// Keep it where ClearVox needs it, or apps silently bypass ClearVox / VPIO cleans the wrong mic. (main thread)
+    private func defaultInputChanged() {
+        guard isRunning else { return }
+        let all = AudioDevices.all()
+        let current = AudioDevices.defaultInput()
+        switch mode {
+        case .voiceIsolation:
+            guard useAsDefault else { return }
+            let bh = all.first { $0.name.lowercased().contains("blackhole") && $0.hasInput }
+            guard let bh, current != bh.id else { return }
+            q.async { self.applyDefaultInput() }
+        case .voiceProcessing:
+            guard let want = inputs.first(where: { $0.uid == inputUID })?.id, current != want else { return }
+            // VPIO follows the default input, so put the chosen mic back and rebuild on it.
+            q.async {
+                AudioDevices.setDefaultInput(want)
+                DispatchQueue.main.async { self.restartIfRunning() }
+            }
+        }
+    }
+
+    /// Voice Processing: VPIO always captures the system default input, so make that the mic chosen in the menu.
+    private func useAsSystemInput(_ id: AudioDeviceID?) {
+        guard let id else { ensureRealDefault(preferred: nil); return }
+        if AudioDevices.defaultInput() != id {
+            AudioDevices.setDefaultInput(id)
+            Thread.sleep(forTimeInterval: 0.2)
         }
     }
 

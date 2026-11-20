@@ -91,6 +91,12 @@ That's acoustic feedback: your speakers are playing into your mic. Check that no
 **Voice Processing**, which cancels echo. ClearVox also stops itself automatically if its audio
 ever gets routed to real speakers.
 
+**I connected AirPods / a headset. Does it still work?**
+Yes. ClearVox keeps using the mic picked in its menu. If macOS switches the system input to the
+headset's mic, ClearVox switches it back. To use the headset's own mic, pick it under
+**Microphone**. Bluetooth headset mics lower the headset's sound quality while in use, so the
+Mac's built-in mic often sounds better.
+
 **"BlackHole isn't installed" in the menu.**
 Run the installer again. If it still doesn't appear, restart your Mac.
 
