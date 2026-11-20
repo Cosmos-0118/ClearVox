@@ -17,3 +17,35 @@ jobs:
         run: |
           command -v shellcheck >/dev/null || brew install shellcheck
           shellcheck -S warning install.sh uninstall.sh mac/build.sh
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: windows
+      - name: Build (RNNoise + DeepFilterNet)
+        run: cargo build --release --features dfn
+      - name: Unit tests
+        run: cargo test --release --lib
+      - name: Noise suppression tests (simulated noisy speech)
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          ./tests/make_fixtures.ps1
+          cargo test --release --test denoise -- --nocapture
+      - name: Lint install scripts
+        shell: pwsh
+        working-directory: .
+        run: |
+          foreach ($f in 'install.ps1','uninstall.ps1') {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | Out-String | Write-Error; exit 1 }
+          }
+

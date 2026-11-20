@@ -1,6 +1,8 @@
 # ClearVox
 
-**Studio-clean voice for Discord, WhatsApp, Zoom and games — on any Mac.**
+**Studio-clean voice for Discord, WhatsApp, Zoom and games — on any Mac, and on Windows.**
+
+> 🪟 **On Windows?** Jump to [ClearVox for Windows](#clearvox-for-windows).
 
 ClearVox runs your microphone through Apple's own voice processing (the same noise and echo
 removal FaceTime uses) and hands the cleaned-up result to every app as a virtual microphone.
@@ -174,7 +176,23 @@ git tag v1.0.0 && git push origin v1.0.0
 
 ### Windows
 
-A Windows version is planned; see [`windows/`](windows/).
+See [`windows/README.md`](windows/README.md). Rust, WASAPI, RNNoise / DeepFilterNet.
+
+---
+
+## ClearVox for Windows
+
+Windows 10 / 11 (64-bit). Same idea as on Mac: your mic is cleaned up and handed to every app as a
+virtual microphone, using the free [VB-CABLE](https://vb-audio.com/Cable/) driver. Open **PowerShell**
+and run:
+
+```powershell
+irm https://raw.githubusercontent.com/Cosmos-0118/ClearVox/main/install.ps1 | iex
+```
+
+Then pick **CABLE Output (VB-Audio Virtual Cable)** as the microphone in Discord, WhatsApp, Zoom and
+games. ClearVox sits in the system tray. Full guide, troubleshooting and uninstall:
+[`windows/README.md`](windows/README.md).
 
 ---
 

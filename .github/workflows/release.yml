@@ -1,7 +1,7 @@
 name: Release
 
-# Push a tag like v1.0.0 to build a universal ClearVox.app and attach it to a GitHub release.
-# install.sh downloads releases/latest/download/ClearVox.zip, so users don't need Xcode.
+# Push a tag like v1.0.0 to build ClearVox.app (macOS) and ClearVox-windows.zip (Windows) and attach
+# them to a GitHub release. install.sh / install.ps1 download these, so users need no compilers.
 on:
   push:
     tags: ["v*"]
@@ -35,3 +35,35 @@ jobs:
             ClearVox.zip
             ClearVox.zip.sha256
           generate_release_notes: true
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: windows
+
+      - name: Build
+        working-directory: windows
+        run: cargo build --release --features dfn
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory pkg | Out-Null
+          Copy-Item windows/target/release/clearvox.exe pkg/
+          Compress-Archive -Path pkg/clearvox.exe -DestinationPath ClearVox-windows.zip
+          $h = (Get-FileHash ClearVox-windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$h  ClearVox-windows.zip" | Tee-Object ClearVox-windows.zip.sha256
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ClearVox-windows.zip
+            ClearVox-windows.zip.sha256
+          generate_release_notes: true
+

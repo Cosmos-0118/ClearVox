@@ -28,3 +28,6 @@ DerivedData/
 # Secrets
 .env
 .env.*
+
+# Windows (Rust)
+windows/target/

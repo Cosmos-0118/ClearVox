@@ -1,0 +1,493 @@
+//! The tray application: menu, settings, device supervision and default-mic management.
+
+use crate::devices::{self, AudioDevice};
+use crate::dsp::{self, Params};
+use crate::pipeline::{Config, Pipeline};
+use crate::{defaultmic, icon, settings};
+use settings::Settings;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tao::event::{Event, StartCause};
+use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use tray_icon::{TrayIcon, TrayIconBuilder};
+use wasapi::DeviceEventCallbacks;
+
+const CABLE_URL: &str = "https://vb-audio.com/Cable/";
+
+#[derive(Debug)]
+enum UserEvent {
+    Menu(String),
+    Tick,
+    DevicesChanged,
+    DefaultChanged,
+}
+
+struct App {
+    st: Settings,
+    params: Arc<Params>,
+    pipe: Option<Pipeline>,
+    mics: Vec<AudioDevice>,
+    outs: Vec<AudioDevice>,
+    tray: TrayIcon,
+    status: Option<String>,
+    level: f32,
+    shown: (bool, bool, u8),
+    login: bool,
+    restart_at: Option<Instant>,
+    fails: u32,
+    own_default_change: Instant,
+    menu_dirty: bool,
+}
+
+pub fn run() -> anyhow::Result<()> {
+    let _ = wasapi::initialize_mta();
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let proxy = event_loop.create_proxy();
+
+    {
+        let p = Mutex::new(proxy.clone());
+        MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
+            let _ = p.lock().unwrap().send_event(UserEvent::Menu(e.id.0));
+        }));
+    }
+    spawn_ticker(proxy.clone());
+    let _notify = register_device_notifications(proxy.clone());
+
+    let st = Settings::load();
+    let params = Params::new(st.denoise, st.highpass, st.limiter, st.agc);
+    let tray = TrayIconBuilder::new()
+        .with_icon(icon::render(false, false, 0.0))
+        .with_tooltip("ClearVox")
+        .build()?;
+    let mut app = App {
+        st,
+        params,
+        pipe: None,
+        mics: vec![],
+        outs: vec![],
+        tray,
+        status: None,
+        level: 0.0,
+        shown: (false, false, 255),
+        login: settings::launch_at_login(),
+        restart_at: None,
+        fails: 0,
+        own_default_change: Instant::now() - Duration::from_secs(60),
+        menu_dirty: true,
+    };
+
+    event_loop.run(move |event, _, flow| {
+        *flow = ControlFlow::Wait;
+        match event {
+            Event::NewEvents(StartCause::Init) => {
+                app.refresh_devices();
+                app.cleanup_stale_default();
+                if app.st.enabled {
+                    app.start();
+                }
+                app.sync_ui();
+            }
+            Event::UserEvent(UserEvent::Menu(id)) => {
+                if app.handle_menu(&id) {
+                    app.shutdown();
+                    *flow = ControlFlow::Exit;
+                    return;
+                }
+                app.sync_ui();
+            }
+            Event::UserEvent(UserEvent::Tick) => {
+                app.tick();
+                app.sync_ui();
+            }
+            Event::UserEvent(UserEvent::DevicesChanged) => {
+                app.refresh_devices();
+                if app.st.enabled && app.pipe.is_none() {
+                    app.start();
+                }
+                app.sync_ui();
+            }
+            Event::UserEvent(UserEvent::DefaultChanged) => {
+                app.default_changed();
+            }
+            _ => {}
+        }
+    })
+}
+
+fn spawn_ticker(proxy: EventLoopProxy<UserEvent>) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(100));
+        if proxy.send_event(UserEvent::Tick).is_err() {
+            break;
+        }
+    });
+}
+
+/// Keeps the registration alive for the whole run; callbacks run on a Windows audio thread.
+fn register_device_notifications(proxy: EventLoopProxy<UserEvent>) -> Option<wasapi::DeviceEventRegistration> {
+    let en = wasapi::DeviceEnumerator::new().ok()?;
+    let mut cb = DeviceEventCallbacks::new();
+    let p = Arc::new(Mutex::new(proxy));
+    let send = move |ev: fn() -> UserEvent| {
+        let p = p.clone();
+        move || {
+            let _ = p.lock().unwrap().send_event(ev());
+        }
+    };
+    let (a, b, c, d) = (send(|| UserEvent::DevicesChanged), send(|| UserEvent::DevicesChanged), send(|| UserEvent::DevicesChanged), send(|| UserEvent::DefaultChanged));
+    cb.set_device_added_callback(move |_| a());
+    cb.set_device_removed_callback(move |_| b());
+    cb.set_device_state_callback(move |_, _| c());
+    cb.set_default_device_callback(move |_, _, _| d());
+    en.register_notification_callback(cb).ok()
+}
+
+impl App {
+    fn save(&self) {
+        self.st.save();
+    }
+
+    // ---------------------------------------------------------------- devices
+
+    fn refresh_devices(&mut self) {
+        let mics = devices::microphones();
+        let outs = devices::virtual_outputs();
+        if mics != self.mics || outs != self.outs {
+            self.mics = mics;
+            self.outs = outs;
+            self.menu_dirty = true;
+        }
+        let mut changed = false;
+        if !self.mics.iter().any(|d| d.id == self.st.input_id) {
+            // Prefer what the user was using before ClearVox moved the default, then the current
+            // default if it is physical, then the first microphone.
+            let prev = &self.st.previous_default_input_id;
+            let cur = devices::default_capture_id().unwrap_or_default();
+            let pick = [prev.as_str(), cur.as_str()]
+                .iter()
+                .find_map(|id| self.mics.iter().find(|d| d.id == *id))
+                .or_else(|| self.mics.first())
+                .map(|d| d.id.clone())
+                .unwrap_or_default();
+            if pick != self.st.input_id {
+                self.st.input_id = pick;
+                changed = true;
+            }
+        }
+        if !self.outs.iter().any(|d| d.id == self.st.output_id) {
+            let pick = self
+                .outs
+                .iter()
+                .find(|d| d.name.contains("CABLE Input"))
+                .or_else(|| self.outs.first())
+                .map(|d| d.id.clone())
+                .unwrap_or_default();
+            if pick != self.st.output_id {
+                self.st.output_id = pick;
+                changed = true;
+            }
+        }
+        if changed {
+            self.save();
+            self.menu_dirty = true;
+        }
+    }
+
+    fn selected_output(&self) -> Option<&AudioDevice> {
+        self.outs.iter().find(|d| d.id == self.st.output_id)
+    }
+
+    // ---------------------------------------------------------------- pipeline
+
+    fn start(&mut self) {
+        self.stop_pipeline();
+        self.restart_at = None;
+        let cfg = Config {
+            input_id: if self.st.input_id.is_empty() { None } else { Some(self.st.input_id.clone()) },
+            output_id: self.st.output_id.clone(),
+            params: self.params.clone(),
+            engine: if self.st.deepfilter && dsp::Engine::DeepFilter.available() { dsp::Engine::DeepFilter } else { dsp::Engine::Rnnoise },
+            source_samples: None,
+        };
+        match Pipeline::start(cfg) {
+            Ok(p) => {
+                self.pipe = Some(p);
+                self.status = None;
+                self.fails = 0;
+                self.apply_default();
+            }
+            Err(e) => {
+                self.status = Some(e);
+                // Retry transient failures (device busy, Bluetooth mic reconnecting) with backoff.
+                // A missing virtual mic is retried when devices change instead.
+                if !self.st.output_id.is_empty() {
+                    self.schedule_restart();
+                }
+            }
+        }
+        self.menu_dirty = true;
+    }
+
+    fn schedule_restart(&mut self) {
+        self.fails += 1;
+        let secs = (1u64 << self.fails.min(4)).min(15);
+        self.restart_at = Some(Instant::now() + Duration::from_secs(secs));
+    }
+
+    fn stop_pipeline(&mut self) {
+        if let Some(p) = self.pipe.take() {
+            p.stop();
+        }
+        self.level = 0.0;
+    }
+
+    fn stop(&mut self) {
+        self.restart_at = None;
+        self.status = None;
+        self.stop_pipeline();
+        self.restore_default();
+        self.menu_dirty = true;
+    }
+
+    fn shutdown(&mut self) {
+        self.stop_pipeline();
+        self.restore_default();
+    }
+
+    fn restart_if_running(&mut self) {
+        if self.st.enabled {
+            self.start();
+        }
+    }
+
+    fn tick(&mut self) {
+        if let Some(p) = &self.pipe {
+            let peak = p.take_peak();
+            self.level = peak.max(self.level * 0.85);
+            if let Some(err) = p.error() {
+                // Device vanished / stream failed: stop, then rebuild after a short pause.
+                self.stop_pipeline();
+                self.status = Some(err);
+                self.schedule_restart();
+                self.menu_dirty = true;
+            }
+        } else {
+            self.level = 0.0;
+        }
+        if let Some(at) = self.restart_at {
+            if Instant::now() >= at && self.st.enabled {
+                self.refresh_devices();
+                self.start();
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- default mic
+
+    fn cable_capture(&self) -> Option<AudioDevice> {
+        devices::virtual_capture_for(self.selected_output()?)
+    }
+
+    /// Makes the virtual mic the Windows default recording device so apps pick it automatically.
+    fn apply_default(&mut self) {
+        if !self.st.use_as_default || self.pipe.is_none() {
+            return;
+        }
+        let Some(cable) = self.cable_capture() else { return };
+        let cur = devices::default_capture_id().unwrap_or_default();
+        if cur == cable.id {
+            return;
+        }
+        if self.mics.iter().any(|d| d.id == cur) {
+            self.st.previous_default_input_id = cur;
+            self.save();
+        }
+        self.own_default_change = Instant::now();
+        let _ = defaultmic::set_default_capture(&cable.id);
+    }
+
+    /// Puts the user's real default mic back (only if the virtual mic is still the default).
+    fn restore_default(&mut self) {
+        let Some(cable) = self.cable_capture() else { return };
+        if devices::default_capture_id().as_deref() != Some(cable.id.as_str()) {
+            return;
+        }
+        let prev = self.st.previous_default_input_id.clone();
+        if let Some(d) = self.mics.iter().find(|d| d.id == prev) {
+            self.own_default_change = Instant::now();
+            let _ = defaultmic::set_default_capture(&d.id);
+        }
+    }
+
+    /// If a previous run was killed while the virtual mic was default, fix that on startup.
+    fn cleanup_stale_default(&mut self) {
+        if !self.st.use_as_default {
+            self.restore_default();
+        }
+    }
+
+    /// Windows switches the default recording device by itself when a headset connects.
+    fn default_changed(&mut self) {
+        if self.pipe.is_some() && self.st.use_as_default && self.own_default_change.elapsed() > Duration::from_millis(1500) {
+            self.apply_default();
+        }
+    }
+
+    // ---------------------------------------------------------------- menu
+
+    /// Returns true when the app should quit.
+    fn handle_menu(&mut self, id: &str) -> bool {
+        match id {
+            "quit" => return true,
+            "toggle" => {
+                self.st.enabled = !self.st.enabled;
+                self.save();
+                if self.st.enabled {
+                    self.refresh_devices();
+                    self.start();
+                } else {
+                    self.stop();
+                }
+            }
+            "opt:denoise" => {
+                self.st.denoise = !self.st.denoise;
+                self.params.denoise.store(self.st.denoise, Relaxed);
+                self.save();
+            }
+            "opt:deepfilter" => {
+                self.st.deepfilter = !self.st.deepfilter;
+                self.save();
+                self.restart_if_running();
+            }
+            "opt:highpass" => {
+                self.st.highpass = !self.st.highpass;
+                self.params.highpass.store(self.st.highpass, Relaxed);
+                self.save();
+            }
+            "opt:limiter" => {
+                self.st.limiter = !self.st.limiter;
+                self.params.limiter.store(self.st.limiter, Relaxed);
+                self.save();
+            }
+            "opt:agc" => {
+                self.st.agc = !self.st.agc;
+                self.params.agc.store(self.st.agc, Relaxed);
+                self.save();
+            }
+            "opt:default" => {
+                self.st.use_as_default = !self.st.use_as_default;
+                self.save();
+                if self.st.use_as_default {
+                    self.apply_default();
+                } else {
+                    self.restore_default();
+                }
+            }
+            "opt:login" => {
+                let want = !self.login;
+                match settings::set_launch_at_login(want) {
+                    Ok(()) => self.login = want,
+                    Err(e) => self.status = Some(format!("Launch at login failed: {e}")),
+                }
+            }
+            "install-cable" => {
+                let _ = std::process::Command::new("explorer").arg(CABLE_URL).spawn();
+            }
+            _ => {
+                if let Some(dev) = id.strip_prefix("mic:") {
+                    if dev != self.st.input_id {
+                        self.st.input_id = dev.to_string();
+                        self.save();
+                        self.restart_if_running();
+                    }
+                } else if let Some(dev) = id.strip_prefix("out:") {
+                    if dev != self.st.output_id {
+                        self.restore_default(); // while the old virtual mic is still known
+                        self.st.output_id = dev.to_string();
+                        self.save();
+                        self.restart_if_running();
+                    }
+                }
+            }
+        }
+        self.menu_dirty = true;
+        false
+    }
+
+    fn build_menu(&self) -> Menu {
+        let menu = Menu::new();
+        let running = self.pipe.is_some();
+        let _ = menu.append(&CheckMenuItem::with_id("toggle", "ClearVox On", true, self.st.enabled, None));
+        if let Some(s) = &self.status {
+            let _ = menu.append(&MenuItem::with_id("status", truncate(s, 90), false, None));
+        } else if running {
+            let _ = menu.append(&MenuItem::with_id("status", "Cleaning your voice", false, None));
+        }
+        let _ = menu.append(&PredefinedMenuItem::separator());
+
+        let mic = Submenu::new("Microphone", true);
+        if self.mics.is_empty() {
+            let _ = mic.append(&MenuItem::with_id("none-mic", "No microphone found", false, None));
+        }
+        for d in &self.mics {
+            let _ = mic.append(&CheckMenuItem::with_id(format!("mic:{}", d.id), &d.name, true, d.id == self.st.input_id, None));
+        }
+        let _ = menu.append(&mic);
+
+        let out = Submenu::new("Virtual Mic", true);
+        if self.outs.is_empty() {
+            let _ = out.append(&MenuItem::with_id("none-out", "VB-CABLE isn't installed", false, None));
+            let _ = out.append(&MenuItem::with_id("install-cable", "Get VB-CABLE…", true, None));
+        }
+        for d in &self.outs {
+            let _ = out.append(&CheckMenuItem::with_id(format!("out:{}", d.id), &d.name, true, d.id == self.st.output_id, None));
+        }
+        let _ = menu.append(&out);
+        let _ = menu.append(&PredefinedMenuItem::separator());
+
+        let opt = |id: &str, text: &str, on: bool| CheckMenuItem::with_id(id, text, true, on, None);
+        let _ = menu.append(&opt("opt:denoise", "Noise Suppression", self.st.denoise));
+        if dsp::Engine::DeepFilter.available() {
+            let _ = menu.append(&opt("opt:deepfilter", "Stronger Suppression (beta)", self.st.deepfilter));
+        }
+        let _ = menu.append(&opt("opt:highpass", "Reduce Air Thumps", self.st.highpass));
+        let _ = menu.append(&opt("opt:limiter", "Peak Limiter", self.st.limiter));
+        let _ = menu.append(&opt("opt:agc", "Auto Gain", self.st.agc));
+        let _ = menu.append(&opt("opt:default", "Use as Default Mic", self.st.use_as_default));
+        let _ = menu.append(&PredefinedMenuItem::separator());
+        let _ = menu.append(&opt("opt:login", "Open at Login", self.login));
+        let _ = menu.append(&MenuItem::with_id("quit", "Quit ClearVox", true, None));
+        menu
+    }
+
+    fn sync_ui(&mut self) {
+        if self.menu_dirty {
+            self.menu_dirty = false;
+            self.tray.set_menu(Some(Box::new(self.build_menu())));
+        }
+        let on = self.pipe.is_some();
+        let err = self.status.is_some() && self.st.enabled;
+        let lvl = (self.level.sqrt() * 6.0).round().min(6.0) as u8;
+        let want = (on, err, if on { lvl } else { 0 });
+        if want != self.shown {
+            self.shown = want;
+            let _ = self.tray.set_icon(Some(icon::render(on, err, want.2 as f32 / 6.0)));
+            let tip = match (&self.status, on) {
+                (Some(s), _) if self.st.enabled => format!("ClearVox: {}", truncate(s, 100)),
+                (_, true) => "ClearVox: on".to_string(),
+                _ => "ClearVox: off".to_string(),
+            };
+            let _ = self.tray.set_tooltip(Some(tip));
+        }
+    }
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(n - 1).collect::<String>())
+    }
+}
