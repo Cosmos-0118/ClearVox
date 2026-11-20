@@ -1,0 +1,30 @@
+# Swift Package Manager / build output
+.build/
+mac/.build/
+mac/build/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+.swiftpm/
+
+# Release artifacts
+*.zip
+*.dmg
+*.pkg
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editors / local tooling
+.vscode/
+.idea/
+*.swp
+.claude/settings.local.json
+
+# Secrets
+.env
+.env.*

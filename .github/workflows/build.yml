@@ -1,0 +1,19 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: mac
+        run: ./build.sh
+      - name: Lint scripts
+        run: |
+          command -v shellcheck >/dev/null || brew install shellcheck
+          shellcheck -S warning install.sh uninstall.sh mac/build.sh
