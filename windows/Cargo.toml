@@ -19,6 +19,11 @@ windows-core = "0.62"
 tract-onnx = "0.23"
 realfft = "3"
 
+[features]
+# Compile the DPDFNet models into the exe (about 45 MB). Off by default: the installer downloads
+# the models the user selects into %LOCALAPPDATA%\ClearVox\models instead.
+embed-models = []
+
 [dependencies.windows]
 version = "0.62"
 features = [

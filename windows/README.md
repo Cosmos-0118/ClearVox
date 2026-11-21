@@ -96,7 +96,8 @@ C++"). Run commands from PowerShell, not Git Bash (Git's `link.exe` shadows MSVC
 
 ```powershell
 cd windows
-cargo build --release                  # ~45 MB: the DPDFNet models are compiled in
+cargo build --release                  # small exe; DPDFNet models are loaded from disk
+# cargo build --release --features embed-models   # ~45 MB exe with the models compiled in
 cargo test --release --lib             # unit tests
 ```
 
@@ -125,7 +126,7 @@ the whole path. `tests/analyze.py` compares loudness before/after for any pair o
 | --- | --- |
 | `src/dsp.rs` | High-pass, engine selection, gate (RNNoise only), auto gain, limiter |
 | `src/dpdfnet.rs` | DPDFNet streaming inference (STFT + `tract` ONNX) |
-| `models/` | The bundled DPDFNet ONNX models and their licence |
+| `models/` | The DPDFNet ONNX models (published as release assets, installed by `install.ps1`) and their licence |
 | `tests/bench/` | Python scripts that compared candidate denoisers |
 | `src/pipeline.rs` | WASAPI capture → DSP → WASAPI render, feedback guard |
 | `src/ring.rs` | Bridges the mic and cable clocks |

@@ -33,6 +33,24 @@ impl Engine {
             _ => None,
         }
     }
+
+    /// True when the model this engine needs is installed (RNNoise is built in).
+    pub fn is_available(self) -> bool {
+        match self {
+            Engine::Rnnoise => true,
+            Engine::Dpdfnet2 => Size::Two.is_installed(),
+            Engine::Dpdfnet8 => Size::Eight.is_installed(),
+        }
+    }
+
+    /// This engine if its model is installed, otherwise the best engine that is
+    /// (DPDFNet-8, then DPDFNet-2, then RNNoise).
+    pub fn or_best_available(self) -> Engine {
+        if self.is_available() {
+            return self;
+        }
+        [Engine::Dpdfnet8, Engine::Dpdfnet2].into_iter().find(|e| e.is_available()).unwrap_or(Engine::Rnnoise)
+    }
 }
 
 enum Denoiser {

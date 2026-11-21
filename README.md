@@ -106,7 +106,10 @@ The installer:
 1. Installs the **VB-CABLE** virtual audio driver. Windows asks for administrator approval once, and
    the download is checked against a pinned SHA-256. If Windows asks you to restart, restart and run
    the installer again.
-2. Installs ClearVox to `%LOCALAPPDATA%\ClearVox`, adds a Start Menu shortcut and starts it.
+2. Asks which voice models to download (DPDFNet-8 ~14 MB, DPDFNet-2 ~10 MB, or none for RNNoise only;
+   Enter installs both). Each is checked against a SHA-256. For scripts, set `CLEARVOX_MODELS` to
+   `dpdfnet8,dpdfnet2`, `all` or `none` to skip the question. Run the installer again to add more.
+3. Installs ClearVox to `%LOCALAPPDATA%\ClearVox`, adds a Start Menu shortcut and starts it.
 
 ClearVox is not code-signed. If you download `clearvox.exe` by hand, SmartScreen may warn you: click
 **More info → Run anyway**. The installer avoids this.
@@ -267,7 +270,8 @@ C++"). Run from PowerShell, not Git Bash.
 
 ```powershell
 cd windows
-cargo build --release          # about 45 MB: the DPDFNet models are compiled in
+cargo build --release          # small exe; models load from windows/models or %LOCALAPPDATA%\ClearVox\models
+# cargo build --release --features embed-models   # single ~45 MB exe with the models compiled in
 cargo test --release --lib     # unit tests
 ```
 

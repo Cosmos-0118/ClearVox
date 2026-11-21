@@ -6,7 +6,9 @@
 #   1. Installs the VB-CABLE virtual audio driver (the "virtual mic"), if missing.
 #      It is downloaded from vb-audio.com and checked against a pinned SHA-256.
 #   2. Downloads the latest ClearVox release (or builds from source with CLEARVOX_FROM_SOURCE=1).
-#   3. Installs ClearVox into %LOCALAPPDATA%\ClearVox, adds a Start Menu shortcut and starts it.
+#   3. Lets you choose which DPDFNet voice models to download (checked against SHA-256) into
+#      %LOCALAPPDATA%\ClearVox\models. Set CLEARVOX_MODELS=dpdfnet8,dpdfnet2 | all | none to skip the prompt.
+#   4. Installs ClearVox into %LOCALAPPDATA%\ClearVox, adds a Start Menu shortcut and starts it.
 #
 # Windows asks for administrator approval once, only for the audio driver.
 
@@ -96,6 +98,68 @@ try {
     }
     if (-not (Test-Path $localExe)) { Die 'clearvox.exe was not found after download/build.' }
 
+    # ---------- 2b. voice models ----------
+    # RNNoise is built into clearvox.exe. The DPDFNet models are separate files you choose here;
+    # they go to %LOCALAPPDATA%\ClearVox\models and the tray menu lists the ones that are installed.
+    Step 'Voice models'
+    $Catalog = @(
+        @{ Id = 'dpdfnet8'; File = 'dpdfnet8_48khz_hr.onnx'; Name = 'DPDFNet-8'; Note = 'best quality, about half a CPU core'; MB = 14 },
+        @{ Id = 'dpdfnet2'; File = 'dpdfnet2_48khz_hr.onnx'; Name = 'DPDFNet-2'; Note = 'lighter on CPU, slightly less clean'; MB = 10 }
+    )
+    $ModelDir = Join-Path $InstallDir 'models'
+    $have = @($Catalog | Where-Object { Test-Path (Join-Path $ModelDir $_.File) } | ForEach-Object { $_.Id })
+
+    # Selection: CLEARVOX_MODELS="dpdfnet8,dpdfnet2" | "all" | "none" skips the prompt (for scripts/CI).
+    $choice = $null
+    if ($env:CLEARVOX_MODELS) {
+        $choice = $env:CLEARVOX_MODELS.Trim().ToLower()
+    } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
+        Write-Host 'Choose which voice models to install (RNNoise, a small basic one, is always included):'
+        for ($i = 0; $i -lt $Catalog.Count; $i++) {
+            $m = $Catalog[$i]
+            $tag = if ($have -contains $m.Id) { ' [installed]' } else { '' }
+            Write-Host ("  {0}) {1,-10} {2} (~{3} MB){4}" -f ($i + 1), $m.Name, $m.Note, $m.MB, $tag)
+        }
+        Write-Host '  a) All of the above     n) None, use RNNoise only'
+        $choice = (Read-Host 'Numbers separated by commas, or a / n  [Enter = all]').Trim().ToLower()
+    }
+    if (-not $choice) { $choice = 'all' }
+
+    $picked = @()
+    if ($choice -eq 'all' -or $choice -eq 'a') {
+        $picked = $Catalog
+    } elseif ($choice -ne 'none' -and $choice -ne 'n') {
+        foreach ($t in ($choice -split '[,\s]+' | Where-Object { $_ })) {
+            $m = $null
+            for ($i = 0; $i -lt $Catalog.Count; $i++) {
+                if ($Catalog[$i].Id -eq $t -or "$($i + 1)" -eq $t) { $m = $Catalog[$i] }
+            }
+            if ($m -and $picked -notcontains $m) { $picked += $m } elseif (-not $m) { Warn "Unknown model '$t' ignored." }
+        }
+    }
+
+    $stageModels = Join-Path $stage 'models'
+    New-Item -ItemType Directory -Force $stageModels | Out-Null
+    foreach ($m in $picked) {
+        $dest = Join-Path $stageModels $m.File
+        try {
+            if ($env:CLEARVOX_FROM_SOURCE -eq '1') {
+                Copy-Item (Join-Path $here ('windows\models\' + $m.File)) $dest -Force
+            } else {
+                Write-Host "Downloading $($m.Name) (~$($m.MB) MB) ..."
+                Invoke-WebRequest -Uri "$base/$($m.File)" -OutFile $dest -UseBasicParsing
+                $expected = ((Invoke-WebRequest -Uri "$base/$($m.File).sha256" -UseBasicParsing).Content -split '\s+')[0].Trim().ToUpper()
+                if (-not $expected) { throw 'no checksum published' }
+                if ((Get-FileHash $dest -Algorithm SHA256).Hash.ToUpper() -ne $expected) { throw 'checksum mismatch' }
+            }
+            Ok "$($m.Name) ready."
+        } catch {
+            Remove-Item $dest -Force -ErrorAction SilentlyContinue
+            Warn "Skipped $($m.Name): $($_.Exception.Message). Run the installer again to retry."
+        }
+    }
+    if ($picked.Count -eq 0 -and $have.Count -eq 0) { Warn 'No DPDFNet model selected: ClearVox will use RNNoise only. Re-run the installer to add more.' }
+
     # ---------- 3. install ----------
     Step 'Installing'
     Get-Process clearvox -ErrorAction SilentlyContinue | ForEach-Object {
@@ -105,6 +169,11 @@ try {
     }
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
     Copy-Item $localExe (Join-Path $InstallDir 'clearvox.exe') -Force
+    $newModels = @(Get-ChildItem $stageModels -Filter *.onnx -ErrorAction SilentlyContinue)
+    if ($newModels.Count -gt 0) {
+        New-Item -ItemType Directory -Force $ModelDir | Out-Null
+        $newModels | Copy-Item -Destination $ModelDir -Force
+    }
     Ok "Installed to $InstallDir"
 
     $shell = New-Object -ComObject WScript.Shell

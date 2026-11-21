@@ -208,7 +208,7 @@ impl App {
             input_id: if self.st.input_id.is_empty() { None } else { Some(self.st.input_id.clone()) },
             output_id: self.st.output_id.clone(),
             params: self.params.clone(),
-            engine: dsp::Engine::from_name(&self.st.engine).unwrap_or(dsp::Engine::Dpdfnet8),
+            engine: dsp::Engine::from_name(&self.st.engine).unwrap_or(dsp::Engine::Dpdfnet8).or_best_available(),
             source_samples: None,
         };
         match Pipeline::start(cfg) {
@@ -450,13 +450,16 @@ impl App {
         let opt = |id: &str, text: &str, on: bool| CheckMenuItem::with_id(id, text, true, on, None);
         let _ = menu.append(&opt("opt:denoise", "Noise Suppression", self.st.denoise));
         let eng = Submenu::new("Voice Engine", true);
-        let cur = dsp::Engine::from_name(&self.st.engine).unwrap_or(dsp::Engine::Dpdfnet8);
+        let cur = dsp::Engine::from_name(&self.st.engine).unwrap_or(dsp::Engine::Dpdfnet8).or_best_available();
+        // Only models that are installed are listed; the installer adds more (re-run it to change them).
         for (id, label, e) in [
             ("dpdfnet8", "Best quality (DPDFNet-8)", dsp::Engine::Dpdfnet8),
             ("dpdfnet2", "Lighter on CPU (DPDFNet-2)", dsp::Engine::Dpdfnet2),
             ("rnnoise", "Minimal (RNNoise, weakest)", dsp::Engine::Rnnoise),
         ] {
-            let _ = eng.append(&CheckMenuItem::with_id(format!("engine:{id}"), label, true, cur == e, None));
+            if e.is_available() {
+                let _ = eng.append(&CheckMenuItem::with_id(format!("engine:{id}"), label, true, cur == e, None));
+            }
         }
         let _ = menu.append(&eng);
         let _ = menu.append(&opt("opt:highpass", "Reduce Air Thumps", self.st.highpass));

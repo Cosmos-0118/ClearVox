@@ -27,11 +27,59 @@ pub enum Size {
     Eight,
 }
 
-fn model_bytes(size: Size) -> &'static [u8] {
-    match size {
+impl Size {
+    /// File name of the ONNX model, as shipped in the release and by the installer.
+    pub fn file_name(self) -> &'static str {
+        match self {
+            Size::Two => "dpdfnet2_48khz_hr.onnx",
+            Size::Eight => "dpdfnet8_48khz_hr.onnx",
+        }
+    }
+
+    /// True when this model can be loaded (embedded, or present in one of the model folders).
+    pub fn is_installed(self) -> bool {
+        cfg!(feature = "embed-models") || find_model(self).is_some()
+    }
+}
+
+/// Folders searched for model files, in order: `CLEARVOX_MODELS_DIR`, `models` next to the exe,
+/// `%LOCALAPPDATA%\ClearVox\models` (where the installer puts them) and, for development builds,
+/// the repository's `windows/models`.
+fn model_dirs() -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(d) = std::env::var_os("CLEARVOX_MODELS_DIR") {
+        dirs.push(d.into());
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(p) = exe.parent() {
+            dirs.push(p.join("models"));
+        }
+    }
+    if let Some(l) = std::env::var_os("LOCALAPPDATA") {
+        dirs.push(std::path::Path::new(&l).join("ClearVox").join("models"));
+    }
+    dirs.push(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("models"));
+    dirs
+}
+
+fn find_model(size: Size) -> Option<std::path::PathBuf> {
+    model_dirs().into_iter().map(|d| d.join(size.file_name())).find(|p| p.is_file())
+}
+
+#[cfg(feature = "embed-models")]
+fn model_bytes(size: Size) -> Result<std::borrow::Cow<'static, [u8]>> {
+    Ok(std::borrow::Cow::Borrowed(match size {
         Size::Two => include_bytes!("../models/dpdfnet2_48khz_hr.onnx"),
         Size::Eight => include_bytes!("../models/dpdfnet8_48khz_hr.onnx"),
-    }
+    }))
+}
+
+#[cfg(not(feature = "embed-models"))]
+fn model_bytes(size: Size) -> Result<std::borrow::Cow<'static, [u8]>> {
+    let path = find_model(size).ok_or_else(|| {
+        anyhow!("model {} is not installed (run the installer again and select it)", size.file_name())
+    })?;
+    Ok(std::borrow::Cow::Owned(std::fs::read(&path).map_err(|e| anyhow!("reading {}: {e}", path.display()))?))
 }
 
 type Plan = TypedRunnableModel;
@@ -52,7 +100,7 @@ pub struct Dpdfnet {
 
 impl Dpdfnet {
     pub fn new(size: Size) -> Result<Self> {
-        let bytes = model_bytes(size);
+        let bytes = model_bytes(size)?;
         let proto = tract_onnx::onnx().proto_model_for_read(&mut &bytes[..])?;
         let meta = |key: &str| -> Result<String> {
             proto
