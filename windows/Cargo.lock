@@ -200,27 +200,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clearvox"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "hound",
- "log",
- "nnnoiseless",
- "realfft",
- "serde",
- "serde_json",
- "tao",
- "tract-onnx",
- "tray-icon",
- "wasapi",
- "windows",
- "windows-core",
- "winreg",
- "winresource",
-]
-
-[[package]]
 name = "combine"
 version = "4.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2113,6 +2092,27 @@ name = "smallvec"
 version = "1.16.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3244542535d5de959d90ec55d1b5ff0fd2bb7b1310223907d5f11932847f7b59"
+
+[[package]]
+name = "sordino"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "hound",
+ "log",
+ "nnnoiseless",
+ "realfft",
+ "serde",
+ "serde_json",
+ "tao",
+ "tract-onnx",
+ "tray-icon",
+ "wasapi",
+ "windows",
+ "windows-core",
+ "winreg",
+ "winresource",
+]
 
 [[package]]
 name = "stable_deref_trait"

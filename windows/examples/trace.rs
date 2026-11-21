@@ -1,5 +1,5 @@
 // Prints per-0.5 s VAD, input and output RMS for a WAV: cargo run --release --example trace -- in.wav [--no-gate]
-use clearvox::{dsp, wavio};
+use sordino::{dsp, wavio};
 fn rms(x: &[f32]) -> f32 { (x.iter().map(|s| s * s).sum::<f32>() / x.len().max(1) as f32).sqrt() }
 fn main() {
     let a: Vec<String> = std::env::args().collect();

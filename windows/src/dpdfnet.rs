@@ -42,12 +42,12 @@ impl Size {
     }
 }
 
-/// Folders searched for model files, in order: `CLEARVOX_MODELS_DIR`, `models` next to the exe,
-/// `%LOCALAPPDATA%\ClearVox\models` (where the installer puts them) and, for development builds,
+/// Folders searched for model files, in order: `SORDINO_MODELS_DIR`, `models` next to the exe,
+/// `%LOCALAPPDATA%\Sordino\models` (where the installer puts them) and, for development builds,
 /// the repository's `windows/models`.
 fn model_dirs() -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
-    if let Some(d) = std::env::var_os("CLEARVOX_MODELS_DIR") {
+    if let Some(d) = std::env::var_os("SORDINO_MODELS_DIR") {
         dirs.push(d.into());
     }
     if let Ok(exe) = std::env::current_exe() {
@@ -56,7 +56,7 @@ fn model_dirs() -> Vec<std::path::PathBuf> {
         }
     }
     if let Some(l) = std::env::var_os("LOCALAPPDATA") {
-        dirs.push(std::path::Path::new(&l).join("ClearVox").join("models"));
+        dirs.push(std::path::Path::new(&l).join("Sordino").join("models"));
     }
     dirs.push(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("models"));
     dirs

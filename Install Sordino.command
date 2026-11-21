@@ -1,5 +1,5 @@
 #!/bin/bash
-# Double-click me in Finder to install ClearVox.
+# Double-click me in Finder to install Sordino.
 cd "$(dirname "$0")"
 /bin/bash ./install.sh
 echo

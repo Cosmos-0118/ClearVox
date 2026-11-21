@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v1.0.0 to build ClearVox.app (macOS) and ClearVox-windows.zip (Windows) and attach
+# Push a tag like v1.0.0 to build Sordino.app (macOS) and Sordino-windows.zip (Windows) and attach
 # them to a GitHub release. install.sh / install.ps1 download these, so users need no compilers.
 on:
   push:
@@ -23,17 +23,17 @@ jobs:
       - name: Package
         run: |
           cd mac/build
-          ditto -c -k --keepParent ClearVox.app ../../ClearVox.zip
+          ditto -c -k --keepParent Sordino.app ../../Sordino.zip
           cd ../..
-          shasum -a 256 ClearVox.zip | tee ClearVox.zip.sha256
+          shasum -a 256 Sordino.zip | tee Sordino.zip.sha256
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ClearVox.zip
-            ClearVox.zip.sha256
+            Sordino.zip
+            Sordino.zip.sha256
           generate_release_notes: true
 
   windows:
@@ -54,10 +54,10 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory pkg | Out-Null
-          Copy-Item windows/target/release/clearvox.exe pkg/
-          Compress-Archive -Path pkg/clearvox.exe -DestinationPath ClearVox-windows.zip
-          $h = (Get-FileHash ClearVox-windows.zip -Algorithm SHA256).Hash.ToLower()
-          "$h  ClearVox-windows.zip" | Tee-Object ClearVox-windows.zip.sha256
+          Copy-Item windows/target/release/sordino.exe pkg/
+          Compress-Archive -Path pkg/sordino.exe -DestinationPath Sordino-windows.zip
+          $h = (Get-FileHash Sordino-windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$h  Sordino-windows.zip" | Tee-Object Sordino-windows.zip.sha256
           # Models are separate release assets so install.ps1 can offer them one by one.
           foreach ($m in Get-ChildItem windows/models/*.onnx) {
             Copy-Item $m.FullName .
@@ -70,8 +70,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ClearVox-windows.zip
-            ClearVox-windows.zip.sha256
+            Sordino-windows.zip
+            Sordino-windows.zip.sha256
             dpdfnet*_48khz_hr.onnx
             dpdfnet*_48khz_hr.onnx.sha256
           generate_release_notes: true

@@ -1,5 +1,5 @@
 [package]
-name = "clearvox"
+name = "sordino"
 version = "0.2.0"
 edition = "2021"
 description = "Studio-clean voice for Discord, Zoom and games on Windows"
@@ -21,7 +21,7 @@ realfft = "3"
 
 [features]
 # Compile the DPDFNet models into the exe (about 45 MB). Off by default: the installer downloads
-# the models the user selects into %LOCALAPPDATA%\ClearVox\models instead.
+# the models the user selects into %LOCALAPPDATA%\Sordino\models instead.
 embed-models = []
 
 [dependencies.windows]

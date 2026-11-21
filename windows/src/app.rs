@@ -59,7 +59,7 @@ pub fn run() -> anyhow::Result<()> {
     let params = Params::new(st.denoise, st.highpass, st.limiter, st.agc);
     let tray = TrayIconBuilder::new()
         .with_icon(icon::render(false, false, 0.0))
-        .with_tooltip("ClearVox")
+        .with_tooltip("Sordino")
         .build()?;
     let mut app = App {
         st,
@@ -161,7 +161,7 @@ impl App {
         }
         let mut changed = false;
         if !self.mics.iter().any(|d| d.id == self.st.input_id) {
-            // Prefer what the user was using before ClearVox moved the default, then the current
+            // Prefer what the user was using before Sordino moved the default, then the current
             // default if it is physical, then the first microphone.
             let prev = &self.st.previous_default_input_id;
             let cur = devices::default_capture_id().unwrap_or_default();
@@ -419,7 +419,7 @@ impl App {
     fn build_menu(&self) -> Menu {
         let menu = Menu::new();
         let running = self.pipe.is_some();
-        let _ = menu.append(&CheckMenuItem::with_id("toggle", "ClearVox On", true, self.st.enabled, None));
+        let _ = menu.append(&CheckMenuItem::with_id("toggle", "Sordino On", true, self.st.enabled, None));
         if let Some(s) = &self.status {
             let _ = menu.append(&MenuItem::with_id("status", truncate(s, 90), false, None));
         } else if running {
@@ -468,7 +468,7 @@ impl App {
         let _ = menu.append(&opt("opt:default", "Use as Default Mic", self.st.use_as_default));
         let _ = menu.append(&PredefinedMenuItem::separator());
         let _ = menu.append(&opt("opt:login", "Open at Login", self.login));
-        let _ = menu.append(&MenuItem::with_id("quit", "Quit ClearVox", true, None));
+        let _ = menu.append(&MenuItem::with_id("quit", "Quit Sordino", true, None));
         menu
     }
 
@@ -485,9 +485,9 @@ impl App {
             self.shown = want;
             let _ = self.tray.set_icon(Some(icon::render(on, err, want.2 as f32 / 6.0)));
             let tip = match (&self.status, on) {
-                (Some(s), _) if self.st.enabled => format!("ClearVox: {}", truncate(s, 100)),
-                (_, true) => "ClearVox: on".to_string(),
-                _ => "ClearVox: off".to_string(),
+                (Some(s), _) if self.st.enabled => format!("Sordino: {}", truncate(s, 100)),
+                (_, true) => "Sordino: on".to_string(),
+                _ => "Sordino: off".to_string(),
             };
             let _ = self.tray.set_tooltip(Some(tip));
         }

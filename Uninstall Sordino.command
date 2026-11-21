@@ -1,5 +1,5 @@
 #!/bin/bash
-# Double-click me in Finder to remove ClearVox (BlackHole is kept).
+# Double-click me in Finder to remove Sordino (BlackHole is kept).
 cd "$(dirname "$0")"
 /bin/bash ./uninstall.sh
 echo

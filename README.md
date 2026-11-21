@@ -1,15 +1,15 @@
 <div align="center">
 
-<img src="assets/logo-256.png" alt="ClearVox" width="128" />
+<img src="assets/logo-256.png" alt="Sordino" width="128" />
 
-# ClearVox
+# Sordino
 
 **Studio-clean voice for Discord, WhatsApp, Zoom and games.**
-ClearVox cleans up your microphone in real time and gives every app a virtual mic with no fans,
+Sordino cleans up your microphone in real time and gives every app a virtual mic with no fans,
 keyboard clatter or hiss.
 
-[![Build](https://img.shields.io/github/actions/workflow/status/Cosmos-0118/ClearVox/build.yml?branch=main&label=build&style=flat-square)](https://github.com/Cosmos-0118/ClearVox/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/Cosmos-0118/ClearVox?include_prereleases&style=flat-square)](https://github.com/Cosmos-0118/ClearVox/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/Cosmos-0118/Sordino/build.yml?branch=main&label=build&style=flat-square)](https://github.com/Cosmos-0118/Sordino/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/Cosmos-0118/Sordino?include_prereleases&style=flat-square)](https://github.com/Cosmos-0118/Sordino/releases)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20%7C%20macOS%2013%2B-555?style=flat-square)
 
 [Install](#install) ·
@@ -22,10 +22,10 @@ keyboard clatter or hiss.
 
 ---
 
-## Why ClearVox
+## Why Sordino
 
 Chat apps have their own noise suppression, but it is often weak, inconsistent, or stacks badly with
-other filters. ClearVox does the cleaning once, before your voice reaches any app.
+other filters. Sordino does the cleaning once, before your voice reaches any app.
 
 - **Works everywhere.** Any app that lets you choose a microphone can use it.
 - **Strong noise removal.** A neural denoiser on Windows, Apple Voice Isolation on Mac.
@@ -43,7 +43,7 @@ other filters. ClearVox does the cleaning once, before your voice reaches any ap
 
 ## Hear it
 
-Each pair below is the same recording before and after ClearVox. Click a file to play it. The
+Each pair below is the same recording before and after Sordino. Click a file to play it. The
 spectrograms show frequency over time: speech is the bright bands, noise is the background haze.
 Speech is synthetic (Windows text-to-speech) and the noise is simulated, so the tests are repeatable.
 
@@ -86,7 +86,7 @@ numbers are the level of the noise-only stretch before the speech starts.
 
 </details>
 
-<sub>Samples were produced with the Windows build: `clearvox.exe --process-file in.wav out.wav --engine dpdfnet8 --agc`.
+<sub>Samples were produced with the Windows build: `sordino.exe --process-file in.wav out.wav --engine dpdfnet8 --agc`.
 You can run the same command on your own recordings. Results on real rooms vary with the mic and the noise.</sub>
 
 ---
@@ -98,7 +98,7 @@ You can run the same command on your own recordings. Results on real rooms vary 
 Open **PowerShell** and run:
 
 ```powershell
-irm https://raw.githubusercontent.com/Cosmos-0118/ClearVox/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Cosmos-0118/Sordino/main/install.ps1 | iex
 ```
 
 The installer:
@@ -107,11 +107,11 @@ The installer:
    the download is checked against a pinned SHA-256. If Windows asks you to restart, restart and run
    the installer again.
 2. Asks which voice models to download (DPDFNet-8 ~14 MB, DPDFNet-2 ~10 MB, or none for RNNoise only;
-   Enter installs both). Each is checked against a SHA-256. For scripts, set `CLEARVOX_MODELS` to
+   Enter installs both). Each is checked against a SHA-256. For scripts, set `SORDINO_MODELS` to
    `dpdfnet8,dpdfnet2`, `all` or `none` to skip the question. Run the installer again to add more.
-3. Installs ClearVox to `%LOCALAPPDATA%\ClearVox`, adds a Start Menu shortcut and starts it.
+3. Installs Sordino to `%LOCALAPPDATA%\Sordino`, adds a Start Menu shortcut and starts it.
 
-ClearVox is not code-signed. If you download `clearvox.exe` by hand, SmartScreen may warn you: click
+Sordino is not code-signed. If you download `sordino.exe` by hand, SmartScreen may warn you: click
 **More info → Run anyway**. The installer avoids this.
 
 ### macOS
@@ -119,17 +119,17 @@ ClearVox is not code-signed. If you download `clearvox.exe` by hand, SmartScreen
 Open **Terminal** and run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cosmos-0118/ClearVox/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cosmos-0118/Sordino/main/install.sh | bash
 ```
 
-Or download the repository ZIP, right-click `Install ClearVox.command`, choose **Open**, then **Open** again.
+Or download the repository ZIP, right-click `Install Sordino.command`, choose **Open**, then **Open** again.
 
 The installer:
 
 1. Installs **BlackHole 2ch** (free, open source, checksum-verified).
-2. Downloads the latest ClearVox release, or builds it from source if none is published. Building may
+2. Downloads the latest Sordino release, or builds it from source if none is published. Building may
    prompt you to install Apple's Command Line Tools.
-3. Installs `ClearVox.app` into **Applications** and starts it.
+3. Installs `Sordino.app` into **Applications** and starts it.
 
 You will be asked for your Mac password once, to install the audio driver. Nothing appears while you
 type it; that is normal. Click **OK** when macOS asks for microphone access.
@@ -151,13 +151,13 @@ speakers or headphones.
 > back into your mic and causes feedback.
 
 In **Discord**, also turn off *Noise Suppression* and *Automatic Input Sensitivity* under
-*Voice & Video*. ClearVox already does that work, and stacking both sounds robotic.
+*Voice & Video*. Sordino already does that work, and stacking both sounds robotic.
 
 ---
 
-## Using ClearVox
+## Using Sordino
 
-Click the ClearVox icon in the system tray (Windows, it may be under the ^ arrow) or the menu bar (Mac).
+Click the Sordino icon in the system tray (Windows, it may be under the ^ arrow) or the menu bar (Mac).
 On Windows the icon is green when on, grey when off, amber on an error, and its mic fills as you speak.
 
 | Setting | What it does |
@@ -172,10 +172,10 @@ On Windows the icon is green when on, grey when off, amber on an error, and its 
 | **Reduce Air Thumps** | 90 Hz high-pass: rumble, desk bumps, breath pops. |
 | **Peak Limiter** | Stops sudden loud sounds from clipping. |
 | **Auto Gain** | Evens out your level while you talk. |
-| **Use as Default Mic** | Makes the virtual mic the system default while ClearVox runs, so apps pick it up automatically. Your real default is restored when you quit. |
-| **Open at Login** | Starts ClearVox when you sign in. |
+| **Use as Default Mic** | Makes the virtual mic the system default while Sordino runs, so apps pick it up automatically. Your real default is restored when you quit. |
+| **Open at Login** | Starts Sordino when you sign in. |
 
-Windows settings are stored in `%APPDATA%\ClearVox\settings.json`.
+Windows settings are stored in `%APPDATA%\Sordino\settings.json`.
 
 ## How it works
 
@@ -187,8 +187,8 @@ macOS
   Mic ─► Apple voice processing ─► high-pass ─► limiter ─► BlackHole 2ch ─► apps use "BlackHole 2ch"
 ```
 
-ClearVox captures your real mic, cleans it, and plays the result into a virtual audio cable. Apps
-record from the other end of that cable. ClearVox refuses to play into anything that is not a
+Sordino captures your real mic, cleans it, and plays the result into a virtual audio cable. Apps
+record from the other end of that cable. Sordino refuses to play into anything that is not a
 virtual cable, so it can never send your voice to your real speakers by itself.
 
 ---
@@ -206,7 +206,7 @@ echo cancellation, so headphones matter more there.
 <details>
 <summary><b>Nobody can hear me</b></summary>
 
-ClearVox must be **On**, and the level meter should move when you speak. The app must use the
+Sordino must be **On**, and the level meter should move when you speak. The app must use the
 virtual mic (*CABLE Output* / *BlackHole 2ch*) as its microphone. Check that microphone access is
 allowed: *Settings → Privacy & security → Microphone* on Windows, *System Settings → Privacy &
 Security → Microphone* on Mac.
@@ -221,7 +221,7 @@ Run the installer again. Restart your computer if the driver still does not appe
 <details>
 <summary><b>I connected AirPods or a headset</b></summary>
 
-ClearVox keeps using the mic chosen in its menu, and restores its virtual mic as the default if the
+Sordino keeps using the mic chosen in its menu, and restores its virtual mic as the default if the
 system switches. To use the headset's own mic, pick it under **Microphone**. Bluetooth headset mics
 lower sound quality while in use, so the built-in mic often sounds better.
 </details>
@@ -229,15 +229,15 @@ lower sound quality while in use, so the built-in mic often sounds better.
 <details>
 <summary><b>My default microphone is still the virtual mic after quitting</b></summary>
 
-ClearVox restores your default on a normal quit, but not after a crash or force-quit.
-On Windows run `%LOCALAPPDATA%\ClearVox\clearvox.exe --restore-default`. On Mac choose your real
+Sordino restores your default on a normal quit, but not after a crash or force-quit.
+On Windows run `%LOCALAPPDATA%\Sordino\sordino.exe --restore-default`. On Mac choose your real
 mic in *System Settings → Sound → Input*.
 </details>
 
 <details>
-<summary><b>macOS says ClearVox is from an unidentified developer</b></summary>
+<summary><b>macOS says Sordino is from an unidentified developer</b></summary>
 
-Right-click ClearVox in Applications, choose **Open**, then **Open** again. The installer normally
+Right-click Sordino in Applications, choose **Open**, then **Open** again. The installer normally
 prevents this.
 </details>
 
@@ -246,13 +246,13 @@ prevents this.
 Windows (PowerShell):
 
 ```powershell
-irm https://raw.githubusercontent.com/Cosmos-0118/ClearVox/main/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/Cosmos-0118/Sordino/main/uninstall.ps1 | iex
 ```
 
 macOS (Terminal):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Cosmos-0118/ClearVox/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Cosmos-0118/Sordino/main/uninstall.sh | bash
 ```
 
 This removes the app, its settings and login entry, and restores your default mic. The virtual
@@ -270,7 +270,7 @@ C++"). Run from PowerShell, not Git Bash.
 
 ```powershell
 cd windows
-cargo build --release          # small exe; models load from windows/models or %LOCALAPPDATA%\ClearVox\models
+cargo build --release          # small exe; models load from windows/models or %LOCALAPPDATA%\Sordino\models
 # cargo build --release --features embed-models   # single ~45 MB exe with the models compiled in
 cargo test --release --lib     # unit tests
 ```
@@ -285,10 +285,10 @@ cargo test --release --test denoise -- --nocapture
 Command-line options:
 
 ```powershell
-clearvox.exe --list-devices
-clearvox.exe --selftest [--mic TEXT] [--file in.wav] [--seconds 8] [--engine dpdfnet2]
-clearvox.exe --process-file in.wav out.wav [--engine rnnoise|dpdfnet2|dpdfnet8] [--agc]
-clearvox.exe --restore-default
+sordino.exe --list-devices
+sordino.exe --selftest [--mic TEXT] [--file in.wav] [--seconds 8] [--engine dpdfnet2]
+sordino.exe --process-file in.wav out.wav [--engine rnnoise|dpdfnet2|dpdfnet8] [--agc]
+sordino.exe --restore-default
 ```
 
 More in [`windows/README.md`](windows/README.md).
@@ -299,13 +299,13 @@ Requires Xcode 15.3+ or the Command Line Tools (Swift 5.9+).
 
 ```bash
 cd mac
-./build.sh                 # native build -> mac/build/ClearVox.app
+./build.sh                 # native build -> mac/build/Sordino.app
 UNIVERSAL=1 ./build.sh     # arm64 + x86_64
-open build/ClearVox.app
+open build/Sordino.app
 ```
 
-Run `CLEARVOX_FROM_SOURCE=1 ./install.sh` to install your local build with the full setup.
-`ClearVox --selftest` runs the pipeline for 8 seconds and prints levels, devices and buffer
+Run `SORDINO_FROM_SOURCE=1 ./install.sh` to install your local build with the full setup.
+`Sordino --selftest` runs the pipeline for 8 seconds and prints levels, devices and buffer
 underruns/overflows.
 
 ### Repository layout

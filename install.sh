@@ -1,19 +1,19 @@
 #!/bin/bash
-# ClearVox one-click installer for macOS.
+# Sordino one-click installer for macOS.
 #
-#   curl -fsSL https://raw.githubusercontent.com/Cosmos-0118/ClearVox/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Cosmos-0118/Sordino/main/install.sh | bash
 #
-# or double-click "Install ClearVox.command" in a downloaded copy of the repo.
+# or double-click "Install Sordino.command" in a downloaded copy of the repo.
 #
 # What it does:
 #   1. Installs the BlackHole 2ch virtual audio driver (the "virtual mic"), if missing.
-#   2. Downloads the latest ClearVox release, or builds it from source if no release exists.
-#   3. Installs ClearVox.app into /Applications and opens it.
+#   2. Downloads the latest Sordino release, or builds it from source if no release exists.
+#   3. Installs Sordino.app into /Applications and opens it.
 set -euo pipefail
 
-REPO="${CLEARVOX_REPO:-Cosmos-0118/ClearVox}"
-BRANCH="${CLEARVOX_BRANCH:-main}"
-APP_NAME="ClearVox"
+REPO="${SORDINO_REPO:-Cosmos-0118/Sordino}"
+BRANCH="${SORDINO_BRANCH:-main}"
+APP_NAME="Sordino"
 INSTALL_DIR="/Applications"
 APP_DEST="$INSTALL_DIR/$APP_NAME.app"
 
@@ -29,7 +29,7 @@ ok()   { printf "${G}✓${N} %s\n" "$*"; }
 warn() { printf "${Y}!${N} %s\n" "$*"; }
 die()  { printf "\n${R}✗ %s${N}\n" "$*" >&2; exit 1; }
 
-WORK="$(mktemp -d -t clearvox-install)"
+WORK="$(mktemp -d -t sordino-install)"
 trap 'rm -rf "$WORK"; [ -n "${SUDO_KEEPALIVE:-}" ] && kill "$SUDO_KEEPALIVE" 2>/dev/null; true' EXIT
 
 # Directory of this script when run from a checkout (empty when piped through curl | bash).
@@ -39,11 +39,11 @@ if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
 fi
 
 # ---------- checks ----------
-printf "${B}ClearVox installer${N}\n${D}Cleaner voice for Discord, WhatsApp, Zoom and games.${N}\n"
+printf "${B}Sordino installer${N}\n${D}Cleaner voice for Discord, WhatsApp, Zoom and games.${N}\n"
 
-[ "$(uname -s)" = "Darwin" ] || die "ClearVox only runs on macOS."
+[ "$(uname -s)" = "Darwin" ] || die "Sordino only runs on macOS."
 MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
-[ "$MACOS_MAJOR" -ge 13 ] || die "ClearVox needs macOS 13 Ventura or newer (you have $(sw_vers -productVersion))."
+[ "$MACOS_MAJOR" -ge 13 ] || die "Sordino needs macOS 13 Ventura or newer (you have $(sw_vers -productVersion))."
 ok "macOS $(sw_vers -productVersion)"
 
 # Ask for the admin password once, up front, and keep sudo alive for the rest of the run.
@@ -76,8 +76,8 @@ else
     ok "BlackHole installed"
 fi
 
-# ---------- 2. Get ClearVox.app ----------
-step "Getting ClearVox"
+# ---------- 2. Get Sordino.app ----------
+step "Getting Sordino"
 APP_SRC=""
 
 download_release() {
@@ -90,7 +90,7 @@ download_release() {
 
 ensure_toolchain() {
     if xcode-select -p >/dev/null 2>&1 && xcrun --find swift >/dev/null 2>&1; then return 0; fi
-    warn "Apple's Command Line Tools are needed to build ClearVox."
+    warn "Apple's Command Line Tools are needed to build Sordino."
     echo "A window will pop up — click ${B}Install${N} and wait for it to finish (5–15 minutes)."
     xcode-select --install >/dev/null 2>&1 || true
     printf "Waiting for the Command Line Tools"
@@ -109,22 +109,22 @@ build_from_source() {
     else
         echo "Downloading source…"
         curl -fsL "https://github.com/$REPO/archive/refs/heads/$BRANCH.tar.gz" | tar -xz -C "$WORK" \
-            || die "Couldn't download the ClearVox source."
+            || die "Couldn't download the Sordino source."
         src="$(find "$WORK" -maxdepth 3 -name Package.swift -path '*/mac/*' -exec dirname {} \; | head -1)"
         [ -n "$src" ] || die "Downloaded source doesn't contain the Mac app."
     fi
     ensure_toolchain
-    echo "Building ClearVox (about a minute)…"
+    echo "Building Sordino (about a minute)…"
     ( cd "$src" && ./build.sh ) >"$WORK/build.log" 2>&1 || { tail -n 30 "$WORK/build.log" >&2; die "Build failed (log above)."; }
     APP_SRC="$src/build/$APP_NAME.app"
 }
 
-if [ "${CLEARVOX_FROM_SOURCE:-0}" != "1" ] && download_release; then
+if [ "${SORDINO_FROM_SOURCE:-0}" != "1" ] && download_release; then
     ok "Downloaded the latest release"
 else
-    [ "${CLEARVOX_FROM_SOURCE:-0}" = "1" ] || warn "No prebuilt release found — building from source instead."
+    [ "${SORDINO_FROM_SOURCE:-0}" = "1" ] || warn "No prebuilt release found — building from source instead."
     build_from_source
-    ok "Built ClearVox"
+    ok "Built Sordino"
 fi
 
 # ---------- 3. Install ----------
@@ -148,9 +148,9 @@ xattr -dr com.apple.quarantine "$APP_DEST" 2>/dev/null || true
 ok "Installed $APP_DEST"
 
 # ---------- 4. Launch ----------
-step "Starting ClearVox"
+step "Starting Sordino"
 open "$APP_DEST"
-ok "ClearVox is running — look for the waveform icon in your menu bar"
+ok "Sordino is running — look for the waveform icon in your menu bar"
 
 cat <<EOF
 
@@ -160,8 +160,8 @@ ${B}Almost done:${N}
      Keep the ${B}speaker${N} (output) on your normal speakers or headphones — never BlackHole.
   3. In Discord, also turn off Noise Suppression and Automatic Input Sensitivity.
 
-${D}Tip: on laptop speakers without headphones, pick "Voice Processing" in the ClearVox menu —
+${D}Tip: on laptop speakers without headphones, pick "Voice Processing" in the Sordino menu —
 it cancels echo so the other person never hears themselves.${N}
 
-To uninstall later: run uninstall.sh (or "Uninstall ClearVox.command").
+To uninstall later: run uninstall.sh (or "Uninstall Sordino.command").
 EOF

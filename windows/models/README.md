@@ -5,6 +5,6 @@ models from [DPDFNet](https://github.com/ceva-ip/DPDFNet) by Ceva (Apache-2.0, s
 `LICENSE-DPDFNet.txt`; the weights are also published under Apache-2.0 at
 <https://huggingface.co/Ceva-IP/DPDFNet>). Paper: <https://arxiv.org/abs/2512.16420>.
 
-`clearvox.exe` loads them from `CLEARVOX_MODELS_DIR`, a `models` folder next to the exe, or
-`%LOCALAPPDATA%\ClearVox\models` (where `install.ps1` puts the ones you pick), and falls back to the
+`sordino.exe` loads them from `SORDINO_MODELS_DIR`, a `models` folder next to the exe, or
+`%LOCALAPPDATA%\Sordino\models` (where `install.ps1` puts the ones you pick), and falls back to the
 built-in RNNoise if none is installed. Build with `--features embed-models` to compile them in instead.

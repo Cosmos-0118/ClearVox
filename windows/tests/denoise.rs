@@ -7,7 +7,7 @@
 //!   * speech keeps its level,
 //!   * magnitude SNR against the clean speech improves.
 
-use clearvox::{dsp, wavio};
+use sordino::{dsp, wavio};
 use std::path::PathBuf;
 
 const SR: usize = 48_000;

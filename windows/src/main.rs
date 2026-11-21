@@ -1,25 +1,25 @@
 #![cfg_attr(not(test), windows_subsystem = "windows")]
 
-use clearvox::pipeline::{Config, Pipeline};
-use clearvox::{app, devices, dsp, settings, wavio};
+use sordino::pipeline::{Config, Pipeline};
+use sordino::{app, devices, dsp, settings, wavio};
 use std::path::Path;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 use std::time::Duration;
 
-const USAGE: &str = "ClearVox for Windows
+const USAGE: &str = "Sordino for Windows
 
 Usage:
-  clearvox.exe                         run in the system tray
-  clearvox.exe --list-devices          list microphones and virtual mics
-  clearvox.exe --restore-default       make a real microphone the default again
-  clearvox.exe --selftest [options]    run the pipeline and print levels
+  sordino.exe                         run in the system tray
+  sordino.exe --list-devices          list microphones and virtual mics
+  sordino.exe --restore-default       make a real microphone the default again
+  sordino.exe --selftest [options]    run the pipeline and print levels
         --mic TEXT      use the microphone whose name contains TEXT
         --out TEXT      use the virtual mic whose name contains TEXT
         --file WAV      feed a 48 kHz WAV instead of the microphone
         --seconds N     duration (default 8)
         --no-denoise --no-gate --no-agc --engine rnnoise|dpdfnet2|dpdfnet8
-  clearvox.exe --process-file IN.wav OUT.wav [--no-denoise] [--no-gate] [--agc] [--hp HZ] [--engine rnnoise|dpdfnet2|dpdfnet8]
+  sordino.exe --process-file IN.wav OUT.wav [--no-denoise] [--no-gate] [--agc] [--hp HZ] [--engine rnnoise|dpdfnet2|dpdfnet8]
 ";
 
 fn parse_engine(args: &[String]) -> anyhow::Result<dsp::Engine> {
@@ -50,13 +50,13 @@ fn attach_console() {
     }
 }
 
-/// Returns false when another ClearVox is already running.
+/// Returns false when another Sordino is already running.
 fn single_instance() -> bool {
     use windows::core::w;
     use windows::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS};
     use windows::Win32::System::Threading::CreateMutexW;
     unsafe {
-        let h = CreateMutexW(None, true, w!("Local\\ClearVox.SingleInstance"));
+        let h = CreateMutexW(None, true, w!("Local\\Sordino.SingleInstance"));
         let dup = h.is_err() || GetLastError() == ERROR_ALREADY_EXISTS;
         std::mem::forget(h);
         !dup
@@ -102,7 +102,7 @@ fn main() -> anyhow::Result<()> {
         }
         println!("Playback:");
         for d in devices::list(devices::DirectionKind::Render) {
-            println!("  {}{}\n      {}", d.name, if d.is_virtual { "  [virtual - usable as ClearVox output]" } else { "" }, d.id);
+            println!("  {}{}\n      {}", d.name, if d.is_virtual { "  [virtual - usable as Sordino output]" } else { "" }, d.id);
         }
         return Ok(());
     }
@@ -129,7 +129,7 @@ fn restore_default() -> anyhow::Result<()> {
     }
     let target = mics.iter().find(|d| d.id == st.previous_default_input_id).or_else(|| mics.first());
     let Some(t) = target else { anyhow::bail!("No microphone found") };
-    clearvox::defaultmic::set_default_capture(&t.id)?;
+    sordino::defaultmic::set_default_capture(&t.id)?;
     println!("Default recording device set to: {}", t.name);
     Ok(())
 }
