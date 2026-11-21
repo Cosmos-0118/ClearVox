@@ -27,6 +27,13 @@ function Step($m) { Write-Host "`n==> $m" -ForegroundColor White }
 function Ok($m)   { Write-Host "[ok] $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "[!] $m" -ForegroundColor Yellow }
 function Die($m)  { Write-Host "`n[x] $m" -ForegroundColor Red; throw $m }
+# Published .sha256 files are served as application/octet-stream, so Invoke-WebRequest returns .Content as
+# bytes (PowerShell 7) or text (5.1). Normalize to the hex digest.
+function Get-ExpectedSha256($url) {
+    $c = (Invoke-WebRequest -Uri $url -UseBasicParsing).Content
+    if ($c -is [byte[]]) { $c = [Text.Encoding]::UTF8.GetString($c) }
+    return (([string]$c).TrimStart([char]0xFEFF) -split '\s+' | Where-Object { $_ } | Select-Object -First 1).Trim().ToUpper()
+}
 
 Write-Host 'ClearVox installer' -ForegroundColor White
 Write-Host 'Cleaner voice for Discord, WhatsApp, Zoom and games.' -ForegroundColor DarkGray
@@ -87,7 +94,7 @@ try {
         $zip = Join-Path $Work 'ClearVox-windows.zip'
         try {
             Invoke-WebRequest -Uri "$base/ClearVox-windows.zip" -OutFile $zip -UseBasicParsing
-            $expected = ((Invoke-WebRequest -Uri "$base/ClearVox-windows.zip.sha256" -UseBasicParsing).Content -split '\s+')[0].Trim().ToUpper()
+            $expected = Get-ExpectedSha256 "$base/ClearVox-windows.zip.sha256"
             $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToUpper()
             if ($expected -and $expected -ne $actual) { Die 'The ClearVox download failed its checksum.' }
             Expand-Archive $zip $stage -Force
@@ -148,7 +155,7 @@ try {
             } else {
                 Write-Host "Downloading $($m.Name) (~$($m.MB) MB) ..."
                 Invoke-WebRequest -Uri "$base/$($m.File)" -OutFile $dest -UseBasicParsing
-                $expected = ((Invoke-WebRequest -Uri "$base/$($m.File).sha256" -UseBasicParsing).Content -split '\s+')[0].Trim().ToUpper()
+                $expected = Get-ExpectedSha256 "$base/$($m.File).sha256"
                 if (-not $expected) { throw 'no checksum published' }
                 if ((Get-FileHash $dest -Algorithm SHA256).Hash.ToUpper() -ne $expected) { throw 'checksum mismatch' }
             }
