@@ -49,7 +49,7 @@ final class Pipeline: ObservableObject {
     }
 
     // Owned by `q`.
-    private let q = DispatchQueue(label: "clearvox.audio", qos: .userInteractive)
+    private let q = DispatchQueue(label: "sordino.audio", qos: .userInteractive)
     private var capture: AVAudioEngine?
     private var playback: AVAudioEngine?
     private var eq: AVAudioUnitEQ?
@@ -135,7 +135,7 @@ final class Pipeline: ObservableObject {
             }
         default:
             isRunning = false
-            status = "Microphone access denied. Enable ClearVox in System Settings > Privacy & Security > Microphone."
+            status = "Microphone access denied. Enable Sordino in System Settings > Privacy & Security > Microphone."
         }
     }
 
@@ -187,7 +187,7 @@ final class Pipeline: ObservableObject {
                 // so the virtual mic can safely be the default. macOS Mic Mode applies.
                 ring = RingBuffer(sampleRate: rate)
                 guard let uid = cfg.inputUID, let m = MicCapture(deviceUID: uid, ring: ring, onPeak: onPeak) else {
-                    throw NSError(domain: "ClearVox", code: 2, userInfo: [NSLocalizedDescriptionKey: "Couldn't open the microphone"])
+                    throw NSError(domain: "Sordino", code: 2, userInfo: [NSLocalizedDescriptionKey: "Couldn't open the microphone"])
                 }
                 mic = m
             case .voiceProcessing:
@@ -198,7 +198,7 @@ final class Pipeline: ObservableObject {
                 ignoreConfigUntil = Date().addingTimeInterval(2)
                 useAsSystemInput(cfg.inputID)
                 if let cur = AudioDevices.defaultInput(), AudioDevices.all().first(where: { $0.id == cur })?.isVirtualLoopback ?? false {
-                    throw NSError(domain: "ClearVox", code: 3, userInfo: [NSLocalizedDescriptionKey:
+                    throw NSError(domain: "Sordino", code: 3, userInfo: [NSLocalizedDescriptionKey:
                         "Voice Processing needs a real mic as the system input. Set Sound › Input to your microphone."])
                 }
                 let engine = AVAudioEngine()
@@ -210,7 +210,7 @@ final class Pipeline: ObservableObject {
                         AVAudioVoiceProcessingOtherAudioDuckingConfiguration(enableAdvancedDucking: false, duckingLevel: .min)
                 }
                 let fmt = input.outputFormat(forBus: 0)
-                guard fmt.sampleRate > 0 else { throw NSError(domain: "ClearVox", code: 1, userInfo: [NSLocalizedDescriptionKey: "Input device unavailable"]) }
+                guard fmt.sampleRate > 0 else { throw NSError(domain: "Sordino", code: 1, userInfo: [NSLocalizedDescriptionKey: "Input device unavailable"]) }
                 rate = fmt.sampleRate
                 ring = RingBuffer(sampleRate: rate)
                 let r = ring!
@@ -256,14 +256,14 @@ final class Pipeline: ObservableObject {
             // Bind the output to the virtual mic as the last step before start, then verify.
             pb.prepare()
             guard Self.setDevice(pb.outputNode.audioUnit, outID) == noErr else {
-                throw NSError(domain: "ClearVox", code: 4, userInfo: [NSLocalizedDescriptionKey: "Couldn't route audio to the virtual mic"])
+                throw NSError(domain: "Sordino", code: 4, userInfo: [NSLocalizedDescriptionKey: "Couldn't route audio to the virtual mic"])
             }
             try cap?.start()
             mic?.start()
             try pb.start()
             guard Self.boundDevice(pb.outputNode.audioUnit) == outID else {
                 pb.stop()
-                throw NSError(domain: "ClearVox", code: 5, userInfo: [NSLocalizedDescriptionKey: "Audio wasn't routed to the virtual mic, so ClearVox stopped to avoid feedback"])
+                throw NSError(domain: "Sordino", code: 5, userInfo: [NSLocalizedDescriptionKey: "Audio wasn't routed to the virtual mic, so Sordino stopped to avoid feedback"])
             }
             capture = cap; micCapture = mic; playback = pb; self.eq = eq; limiterUnit = lim; routedOutput = outID
 
@@ -338,7 +338,7 @@ final class Pipeline: ObservableObject {
     }
 
     /// macOS changes the default input on its own when a headset (AirPods, USB, Bluetooth) connects.
-    /// Keep it where ClearVox needs it, or apps silently bypass ClearVox / VPIO cleans the wrong mic. (main thread)
+    /// Keep it where Sordino needs it, or apps silently bypass Sordino / VPIO cleans the wrong mic. (main thread)
     private func defaultInputChanged() {
         guard isRunning else { return }
         let all = AudioDevices.all()
@@ -401,7 +401,7 @@ final class Pipeline: ObservableObject {
     /// Opens the macOS Mic Mode picker (Voice Isolation / Wide Spectrum / Standard).
     func showMicModes() { AVCaptureDevice.showSystemUserInterface(.microphoneModes) }
 
-    /// `ClearVox --selftest`: prints what the pipeline is doing for 8 s, then exits.
+    /// `Sordino --selftest`: prints what the pipeline is doing for 8 s, then exits.
     private func selfTest() {
         start(persist: false)
         var n = 0

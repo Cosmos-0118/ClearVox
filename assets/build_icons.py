@@ -69,14 +69,14 @@ def main():
     for n, p in zip(sizes, pngs):
         ents += struct.pack("<BBBBHHII", n % 256, n % 256, 0, 0, 1, 32, len(p), off + len(blob))
         blob += p
-    write("ClearVox.ico", head + ents + blob)
+    write("Sordino.ico", head + ents + blob)
     # macOS .icns: standard ~10% transparent margin around the squircle
     types = {"ic11": 32, "ic12": 64, "ic07": 128, "ic13": 256, "ic08": 256, "ic14": 512, "ic09": 512, "ic10": 1024}
     body = b""
     for t, n in types.items():
         p = png_bytes(render(n, inset=0.0977))
         body += t.encode() + struct.pack(">I", len(p) + 8) + p
-    write("ClearVox.icns", b"icns" + struct.pack(">I", len(body) + 8) + body)
+    write("Sordino.icns", b"icns" + struct.pack(">I", len(body) + 8) + body)
 
 if __name__ == "__main__":
     main()

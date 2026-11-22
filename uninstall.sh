@@ -1,19 +1,19 @@
 #!/bin/bash
-# Removes ClearVox. Pass --blackhole to also remove the BlackHole 2ch driver
+# Removes Sordino. Pass --blackhole to also remove the BlackHole 2ch driver
 # (other apps may use it, so it's kept by default).
 set -euo pipefail
 
-APP="/Applications/ClearVox.app"
-BUNDLE_ID="com.clearvox.mac"
+APP="/Applications/Sordino.app"
+BUNDLE_ID="com.sordino.mac"
 BLACKHOLE_DRIVER="/Library/Audio/Plug-Ins/HAL/BlackHole2ch.driver"
 
-echo "Uninstalling ClearVox…"
+echo "Uninstalling Sordino…"
 
-# Quitting normally lets ClearVox hand the default mic back to your real microphone.
-if pgrep -x ClearVox >/dev/null; then
-    osascript -e 'tell application "ClearVox" to quit' >/dev/null 2>&1 || true
+# Quitting normally lets Sordino hand the default mic back to your real microphone.
+if pgrep -x Sordino >/dev/null; then
+    osascript -e 'tell application "Sordino" to quit' >/dev/null 2>&1 || true
     sleep 2
-    pkill -x ClearVox 2>/dev/null || true
+    pkill -x Sordino 2>/dev/null || true
 fi
 
 if [ -d "$APP" ]; then

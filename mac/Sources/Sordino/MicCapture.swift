@@ -5,7 +5,7 @@ import AVFoundation
 final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
     static let sampleRate = 48_000.0
     private let session = AVCaptureSession()
-    private let queue = DispatchQueue(label: "clearvox.capture", qos: .userInteractive)
+    private let queue = DispatchQueue(label: "sordino.capture", qos: .userInteractive)
     private let ring: RingBuffer
     private let onPeak: (Float) -> Void
 

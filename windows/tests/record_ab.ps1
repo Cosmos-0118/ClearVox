@@ -1,21 +1,21 @@
-# Records your microphone (raw, no ClearVox) and runs the recording through every engine so the
+# Records your microphone (raw, no Sordino) and runs the recording through every engine so the
 # results can be compared. Run it from PowerShell:   ./tests/record_ab.ps1
 #
 # It asks you to stay quiet for 4 s (room/fan noise), speak normally for 12 s, then speak loudly
-# for 6 s. Output goes to %USERPROFILE%\Documents\ClearVox-AB.
+# for 6 s. Output goes to %USERPROFILE%\Documents\Sordino-AB.
 param(
     [string]$Mic = '',          # part of the microphone name; default: the first non-CABLE capture device
     [string]$Exe = ''
 )
 $ErrorActionPreference = 'Stop'
-$out = Join-Path $env:USERPROFILE 'Documents\ClearVox-AB'
+$out = Join-Path $env:USERPROFILE 'Documents\Sordino-AB'
 New-Item -ItemType Directory -Force $out | Out-Null
 if (-not $Exe) {
-    $Exe = Join-Path $env:LOCALAPPDATA 'ClearVox\clearvox.exe'
-    $dev = Join-Path $PSScriptRoot '..\target\release\clearvox.exe'
+    $Exe = Join-Path $env:LOCALAPPDATA 'Sordino\sordino.exe'
+    $dev = Join-Path $PSScriptRoot '..\target\release\sordino.exe'
     if (Test-Path $dev) { $Exe = $dev }
 }
-if (-not (Test-Path $Exe)) { throw "clearvox.exe not found: $Exe" }
+if (-not (Test-Path $Exe)) { throw "sordino.exe not found: $Exe" }
 if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) { throw 'ffmpeg is needed on PATH for recording.' }
 
 # Pick the microphone.
@@ -26,7 +26,7 @@ if ($names.Count -eq 0) { throw 'No microphone found.' }
 $micName = $names[0]
 Write-Host "Recording from: $micName" -ForegroundColor Cyan
 
-if (Get-Process clearvox -ErrorAction SilentlyContinue) { Write-Host 'Note: ClearVox is running; that is fine, this recording is the raw microphone.' -ForegroundColor DarkGray }
+if (Get-Process sordino -ErrorAction SilentlyContinue) { Write-Host 'Note: Sordino is running; that is fine, this recording is the raw microphone.' -ForegroundColor DarkGray }
 
 $raw = Join-Path $out 'raw.wav'
 $ffArgs = "-y -hide_banner -loglevel error -f dshow -i `"audio=$micName`" -t 22 -ar 48000 -ac 1 `"$raw`""

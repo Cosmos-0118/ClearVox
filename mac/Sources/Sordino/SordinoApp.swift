@@ -4,7 +4,7 @@ import SwiftUI
 
 /// Menu-bar-only app: no SwiftUI scenes (an empty `Settings` scene shows a blank "Settings" window).
 @main
-enum ClearVoxApp {
+enum SordinoApp {
     static func main() {
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateIcon(_ running: Bool) {
-        let img = NSImage(systemSymbolName: running ? "waveform.badge.mic" : "mic.slash", accessibilityDescription: "ClearVox")
+        let img = NSImage(systemSymbolName: running ? "waveform.badge.mic" : "mic.slash", accessibilityDescription: "Sordino")
         img?.isTemplate = true
         statusItem.button?.image = img
     }
@@ -83,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
 
         // Header
-        let header = HeaderView(title: "ClearVox") { [weak self] in self?.pipe.toggle() }
+        let header = HeaderView(title: "Sordino") { [weak self] in self?.pipe.toggle() }
         add(view: header)
         refreshers.append { [weak self, weak header] in
             guard let self, let header else { return }
@@ -153,7 +153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
         addSection("Options")
         if pipe.mode == .voiceIsolation {
-            addToggle("Use as Default Mic", help: "Apps pick up ClearVox automatically", \.useAsDefault)
+            addToggle("Use as Default Mic", help: "Apps pick up Sordino automatically", \.useAsDefault)
         }
         addToggle("Reduce Air Thumps", help: "High-pass filter at 90 Hz", \.highPass)
         addToggle("Peak Limiter", help: "Stops loud peaks from clipping", \.limiter)
@@ -167,7 +167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(ActionItem("Sound Settings…") {
             if let url = URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension") { NSWorkspace.shared.open(url) }
         })
-        let quit = NSMenuItem(title: "Quit ClearVox", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Sordino", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
 
         refreshers.forEach { $0() }

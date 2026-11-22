@@ -1,6 +1,6 @@
 #!/bin/bash
-# Double-click me in Finder to remove ClearVox (BlackHole is kept).
+# Double-click me in Finder to install Sordino.
 cd "$(dirname "$0")"
-/bin/bash ./uninstall.sh
+/bin/bash ./install.sh
 echo
 read -n 1 -s -r -p "Press any key to close this window…"

@@ -1,4 +1,4 @@
-"""Per-window loudness of a WAV before/after ClearVox: python analyze.py in.wav out.wav [win_s]
+"""Per-window loudness of a WAV before/after Sordino: python analyze.py in.wav out.wav [win_s]
 
 Prints dBFS RMS per window for both files plus a summary of the quietest windows (noise floor)
 and loudest (speech), so suppression and speech loss can be read off directly.

@@ -27,7 +27,7 @@ impl From<DirectionKind> for Direction {
 }
 
 /// Virtual cable / loopback drivers that must never be offered as a physical microphone, and
-/// the only kind of device ClearVox will ever play processed audio to.
+/// the only kind of device Sordino will ever play processed audio to.
 pub fn is_virtual_name(name: &str) -> bool {
     let n = name.to_lowercase();
     ["cable input", "cable output", "vb-audio", "voicemeeter", "blackhole", "virtual cable", "virtual audio", "hi-fi cable", "vac "]
@@ -54,12 +54,12 @@ pub fn list(kind: DirectionKind) -> Vec<AudioDevice> {
     out
 }
 
-/// Physical microphones only (virtual cables are excluded so ClearVox can't capture itself).
+/// Physical microphones only (virtual cables are excluded so Sordino can't capture itself).
 pub fn microphones() -> Vec<AudioDevice> {
     list(DirectionKind::Capture).into_iter().filter(|d| !d.is_virtual).collect()
 }
 
-/// Virtual playback endpoints ClearVox may send cleaned audio to.
+/// Virtual playback endpoints Sordino may send cleaned audio to.
 pub fn virtual_outputs() -> Vec<AudioDevice> {
     list(DirectionKind::Render).into_iter().filter(|d| d.is_virtual).collect()
 }

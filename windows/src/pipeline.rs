@@ -66,7 +66,7 @@ impl Pipeline {
         // Render first: if the virtual mic can't be opened we never touch the microphone.
         {
             let (sh, tx, id) = (shared.clone(), tx.clone(), cfg.output_id.clone());
-            threads.push(thread::Builder::new().name("clearvox-render".into()).spawn(move || render_thread(sh, id, tx)).unwrap());
+            threads.push(thread::Builder::new().name("sordino-render".into()).spawn(move || render_thread(sh, id, tx)).unwrap());
         }
         match rx.recv_timeout(Duration::from_secs(5)) {
             Ok(Ok(())) => {}
@@ -79,7 +79,7 @@ impl Pipeline {
             let (input, params, src, engine) = (cfg.input_id.clone(), cfg.params.clone(), cfg.source_samples.clone(), cfg.engine);
             threads.push(
                 thread::Builder::new()
-                    .name("clearvox-capture".into())
+                    .name("sordino-capture".into())
                     .spawn(move || match src {
                         Some(samples) => file_source_thread(sh, samples, params, engine, tx),
                         None => capture_thread(sh, input, params, engine, tx),
@@ -160,7 +160,7 @@ fn render_thread(shared: Arc<Shared>, id: String, ready: mpsc::Sender<Result<(),
         }
         let name = dev.get_friendlyname().unwrap_or_default();
         if !is_virtual_name(&name) {
-            return Err(format!("\"{name}\" is a real playback device. ClearVox only plays to a virtual mic, to avoid feedback."));
+            return Err(format!("\"{name}\" is a real playback device. Sordino only plays to a virtual mic, to avoid feedback."));
         }
         let mut client = dev.get_iaudioclient().map_err(|e| format!("Couldn't open the virtual mic: {e}"))?;
         let fmt = WaveFormat::new(32, 32, SampleType::Float, SAMPLE_RATE as usize, 2, None);
@@ -235,7 +235,7 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
         }
         let name = dev.get_friendlyname().unwrap_or_default();
         if is_virtual_name(&name) {
-            return Err(format!("\"{name}\" is a virtual mic. Pick your real microphone in ClearVox."));
+            return Err(format!("\"{name}\" is a virtual mic. Pick your real microphone in Sordino."));
         }
         let mut client = dev.get_iaudioclient().map_err(|e| format!("Couldn't open the microphone: {e}"))?;
         let fmt = WaveFormat::new(32, 32, SampleType::Float, SAMPLE_RATE as usize, 1, None);

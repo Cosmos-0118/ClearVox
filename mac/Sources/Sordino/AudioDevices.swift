@@ -14,10 +14,10 @@ struct AudioDevice: Identifiable, Hashable {
             || n.contains("teams audio") || n.contains("parrot")
     }
 
-    /// Private aggregates created by CoreAudio / voice processing / ClearVox itself. Never user-selectable.
+    /// Private aggregates created by CoreAudio / voice processing / Sordino itself. Never user-selectable.
     var isInternalAggregate: Bool {
         name.hasPrefix("CADefaultDeviceAggregate") || name.hasPrefix("VPAUAggregateAudioDevice")
-            || name == "ClearVox Capture"
+            || name == "Sordino Capture"
     }
 }
 
@@ -86,8 +86,8 @@ enum AudioDevices {
     /// unit can be bound to a specific mic instead of the system default input.
     static func makeAggregate(inputUID: String, outputUID: String) -> AudioDeviceID? {
         let desc: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "ClearVox Capture",
-            kAudioAggregateDeviceUIDKey: "com.clearvox.capture.\(UUID().uuidString)",
+            kAudioAggregateDeviceNameKey: "Sordino Capture",
+            kAudioAggregateDeviceUIDKey: "com.sordino.capture.\(UUID().uuidString)",
             kAudioAggregateDeviceIsPrivateKey: 1,
             kAudioAggregateDeviceMasterSubDeviceKey: outputUID,
             kAudioAggregateDeviceSubDeviceListKey: [

@@ -1,14 +1,14 @@
-# ClearVox one-click installer for Windows.
+# Sordino one-click installer for Windows.
 #
-#   irm https://raw.githubusercontent.com/Cosmos-0118/ClearVox/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/Cosmos-0118/Sordino/main/install.ps1 | iex
 #
 # What it does:
 #   1. Installs the VB-CABLE virtual audio driver (the "virtual mic"), if missing.
 #      It is downloaded from vb-audio.com and checked against a pinned SHA-256.
-#   2. Downloads the latest ClearVox release (or builds from source with CLEARVOX_FROM_SOURCE=1).
+#   2. Downloads the latest Sordino release (or builds from source with SORDINO_FROM_SOURCE=1).
 #   3. Lets you choose which DPDFNet voice models to download (checked against SHA-256) into
-#      %LOCALAPPDATA%\ClearVox\models. Set CLEARVOX_MODELS=dpdfnet8,dpdfnet2 | all | none to skip the prompt.
-#   4. Installs ClearVox into %LOCALAPPDATA%\ClearVox, adds a Start Menu shortcut and starts it.
+#      %LOCALAPPDATA%\Sordino\models. Set SORDINO_MODELS=dpdfnet8,dpdfnet2 | all | none to skip the prompt.
+#   4. Installs Sordino into %LOCALAPPDATA%\Sordino, adds a Start Menu shortcut and starts it.
 #
 # Windows asks for administrator approval once, only for the audio driver.
 
@@ -16,9 +16,9 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Repo = if ($env:CLEARVOX_REPO) { $env:CLEARVOX_REPO } else { 'Cosmos-0118/ClearVox' }
-$InstallDir = Join-Path $env:LOCALAPPDATA 'ClearVox'
-$StartMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\ClearVox.lnk'
+$Repo = if ($env:SORDINO_REPO) { $env:SORDINO_REPO } else { 'Cosmos-0118/Sordino' }
+$InstallDir = Join-Path $env:LOCALAPPDATA 'Sordino'
+$StartMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Sordino.lnk'
 
 $CableUrl = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack46.zip'
 $CableSha256 = 'BC44E8974191A5A2427D6C979E2DAB08DBB09925F3F435DFA2F0BA3E45B6EB90'
@@ -35,16 +35,16 @@ function Get-ExpectedSha256($url) {
     return (([string]$c).TrimStart([char]0xFEFF) -split '\s+' | Where-Object { $_ } | Select-Object -First 1).Trim().ToUpper()
 }
 
-Write-Host 'ClearVox installer' -ForegroundColor White
+Write-Host 'Sordino installer' -ForegroundColor White
 Write-Host 'Cleaner voice for Discord, WhatsApp, Zoom and games.' -ForegroundColor DarkGray
 
 # ---------- checks ----------
-if ($env:OS -ne 'Windows_NT') { Die 'ClearVox for Windows only runs on Windows.' }
-if ([Environment]::OSVersion.Version.Build -lt 17763) { Die 'ClearVox needs Windows 10 (1809) or newer.' }
-if (-not [Environment]::Is64BitOperatingSystem) { Die 'ClearVox needs 64-bit Windows.' }
+if ($env:OS -ne 'Windows_NT') { Die 'Sordino for Windows only runs on Windows.' }
+if ([Environment]::OSVersion.Version.Build -lt 17763) { Die 'Sordino needs Windows 10 (1809) or newer.' }
+if (-not [Environment]::Is64BitOperatingSystem) { Die 'Sordino needs 64-bit Windows.' }
 Ok "Windows $([Environment]::OSVersion.Version)"
 
-$Work = Join-Path ([IO.Path]::GetTempPath()) ("clearvox-install-" + [Guid]::NewGuid().ToString('N'))
+$Work = Join-Path ([IO.Path]::GetTempPath()) ("sordino-install-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $Work | Out-Null
 
 try {
@@ -75,39 +75,39 @@ try {
         }
     }
 
-    # ---------- 2. ClearVox ----------
-    Step 'ClearVox'
+    # ---------- 2. Sordino ----------
+    Step 'Sordino'
     $stage = Join-Path $Work 'app'
     New-Item -ItemType Directory -Path $stage | Out-Null
     $localExe = $null
     $here = if ($PSScriptRoot) { $PSScriptRoot } else { $null }
 
-    if ($env:CLEARVOX_FROM_SOURCE -eq '1') {
-        if (-not $here -or -not (Test-Path (Join-Path $here 'windows\Cargo.toml'))) { Die 'CLEARVOX_FROM_SOURCE=1 needs to run from a checkout of the repository.' }
+    if ($env:SORDINO_FROM_SOURCE -eq '1') {
+        if (-not $here -or -not (Test-Path (Join-Path $here 'windows\Cargo.toml'))) { Die 'SORDINO_FROM_SOURCE=1 needs to run from a checkout of the repository.' }
         if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { Die 'Building from source needs Rust: https://rustup.rs' }
         Write-Host 'Building from source (this takes a few minutes the first time) ...'
         Push-Location (Join-Path $here 'windows')
         try { cargo build --release; if ($LASTEXITCODE -ne 0) { Die 'Build failed.' } } finally { Pop-Location }
-        $localExe = Join-Path $here 'windows\target\release\clearvox.exe'
+        $localExe = Join-Path $here 'windows\target\release\sordino.exe'
     } else {
         $base = "https://github.com/$Repo/releases/latest/download"
-        $zip = Join-Path $Work 'ClearVox-windows.zip'
+        $zip = Join-Path $Work 'Sordino-windows.zip'
         try {
-            Invoke-WebRequest -Uri "$base/ClearVox-windows.zip" -OutFile $zip -UseBasicParsing
-            $expected = Get-ExpectedSha256 "$base/ClearVox-windows.zip.sha256"
+            Invoke-WebRequest -Uri "$base/Sordino-windows.zip" -OutFile $zip -UseBasicParsing
+            $expected = Get-ExpectedSha256 "$base/Sordino-windows.zip.sha256"
             $actual = (Get-FileHash $zip -Algorithm SHA256).Hash.ToUpper()
-            if ($expected -and $expected -ne $actual) { Die 'The ClearVox download failed its checksum.' }
+            if ($expected -and $expected -ne $actual) { Die 'The Sordino download failed its checksum.' }
             Expand-Archive $zip $stage -Force
-            $localExe = Join-Path $stage 'clearvox.exe'
+            $localExe = Join-Path $stage 'sordino.exe'
         } catch {
-            Die "Couldn't download a ClearVox release ($($_.Exception.Message)). If none is published yet, run from a checkout with CLEARVOX_FROM_SOURCE=1."
+            Die "Couldn't download a Sordino release ($($_.Exception.Message)). If none is published yet, run from a checkout with SORDINO_FROM_SOURCE=1."
         }
     }
-    if (-not (Test-Path $localExe)) { Die 'clearvox.exe was not found after download/build.' }
+    if (-not (Test-Path $localExe)) { Die 'sordino.exe was not found after download/build.' }
 
     # ---------- 2b. voice models ----------
-    # RNNoise is built into clearvox.exe. The DPDFNet models are separate files you choose here;
-    # they go to %LOCALAPPDATA%\ClearVox\models and the tray menu lists the ones that are installed.
+    # RNNoise is built into sordino.exe. The DPDFNet models are separate files you choose here;
+    # they go to %LOCALAPPDATA%\Sordino\models and the tray menu lists the ones that are installed.
     Step 'Voice models'
     $Catalog = @(
         @{ Id = 'dpdfnet8'; File = 'dpdfnet8_48khz_hr.onnx'; Name = 'DPDFNet-8'; Note = 'best quality, about half a CPU core'; MB = 14 },
@@ -116,10 +116,10 @@ try {
     $ModelDir = Join-Path $InstallDir 'models'
     $have = @($Catalog | Where-Object { Test-Path (Join-Path $ModelDir $_.File) } | ForEach-Object { $_.Id })
 
-    # Selection: CLEARVOX_MODELS="dpdfnet8,dpdfnet2" | "all" | "none" skips the prompt (for scripts/CI).
+    # Selection: SORDINO_MODELS="dpdfnet8,dpdfnet2" | "all" | "none" skips the prompt (for scripts/CI).
     $choice = $null
-    if ($env:CLEARVOX_MODELS) {
-        $choice = $env:CLEARVOX_MODELS.Trim().ToLower()
+    if ($env:SORDINO_MODELS) {
+        $choice = $env:SORDINO_MODELS.Trim().ToLower()
     } elseif ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected) {
         Write-Host 'Choose which voice models to install (RNNoise, a small basic one, is always included):'
         for ($i = 0; $i -lt $Catalog.Count; $i++) {
@@ -150,7 +150,7 @@ try {
     foreach ($m in $picked) {
         $dest = Join-Path $stageModels $m.File
         try {
-            if ($env:CLEARVOX_FROM_SOURCE -eq '1') {
+            if ($env:SORDINO_FROM_SOURCE -eq '1') {
                 Copy-Item (Join-Path $here ('windows\models\' + $m.File)) $dest -Force
             } else {
                 Write-Host "Downloading $($m.Name) (~$($m.MB) MB) ..."
@@ -165,17 +165,17 @@ try {
             Warn "Skipped $($m.Name): $($_.Exception.Message). Run the installer again to retry."
         }
     }
-    if ($picked.Count -eq 0 -and $have.Count -eq 0) { Warn 'No DPDFNet model selected: ClearVox will use RNNoise only. Re-run the installer to add more.' }
+    if ($picked.Count -eq 0 -and $have.Count -eq 0) { Warn 'No DPDFNet model selected: Sordino will use RNNoise only. Re-run the installer to add more.' }
 
     # ---------- 3. install ----------
     Step 'Installing'
-    Get-Process clearvox -ErrorAction SilentlyContinue | ForEach-Object {
-        Write-Host 'Closing the running ClearVox ...'
+    Get-Process sordino -ErrorAction SilentlyContinue | ForEach-Object {
+        Write-Host 'Closing the running Sordino ...'
         $_.CloseMainWindow() | Out-Null
         if (-not $_.WaitForExit(2000)) { Stop-Process -Id $_.Id -Force }
     }
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
-    Copy-Item $localExe (Join-Path $InstallDir 'clearvox.exe') -Force
+    Copy-Item $localExe (Join-Path $InstallDir 'sordino.exe') -Force
     $newModels = @(Get-ChildItem $stageModels -Filter *.onnx -ErrorAction SilentlyContinue)
     if ($newModels.Count -gt 0) {
         New-Item -ItemType Directory -Force $ModelDir | Out-Null
@@ -186,15 +186,15 @@ try {
     $shell = New-Object -ComObject WScript.Shell
     New-Item -ItemType Directory -Force (Split-Path $StartMenu) | Out-Null
     $lnk = $shell.CreateShortcut($StartMenu)
-    $lnk.TargetPath = Join-Path $InstallDir 'clearvox.exe'
+    $lnk.TargetPath = Join-Path $InstallDir 'sordino.exe'
     $lnk.WorkingDirectory = $InstallDir
-    $lnk.Description = 'ClearVox - clean voice for chat apps'
+    $lnk.Description = 'Sordino - clean voice for chat apps'
     $lnk.Save()
     Ok 'Start Menu shortcut created.'
 
-    Start-Process (Join-Path $InstallDir 'clearvox.exe')
+    Start-Process (Join-Path $InstallDir 'sordino.exe')
     Write-Host ''
-    Write-Host 'ClearVox is running in the system tray (bottom-right, maybe under the ^ arrow).' -ForegroundColor Green
+    Write-Host 'Sordino is running in the system tray (bottom-right, maybe under the ^ arrow).' -ForegroundColor Green
     Write-Host 'In Discord / WhatsApp / Zoom, choose "CABLE Output (VB-Audio Virtual Cable)" as the microphone.'
     Write-Host 'Never set an app''s speaker/output to "CABLE Input".' -ForegroundColor Yellow
 }

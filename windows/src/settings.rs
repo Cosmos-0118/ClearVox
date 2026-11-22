@@ -1,4 +1,4 @@
-//! Persistent settings in `%APPDATA%\ClearVox\settings.json`, plus the launch-at-login Run key.
+//! Persistent settings in `%APPDATA%\Sordino\settings.json`, plus the launch-at-login Run key.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -18,7 +18,7 @@ pub struct Settings {
     /// Denoiser: "dpdfnet8" (best, default), "dpdfnet2" (lighter) or "rnnoise" (minimal).
     pub engine: String,
     pub use_as_default: bool,
-    /// Default capture device before ClearVox took over, so it can be restored.
+    /// Default capture device before Sordino took over, so it can be restored.
     pub previous_default_input_id: String,
 }
 
@@ -41,7 +41,7 @@ impl Default for Settings {
 
 fn dir() -> PathBuf {
     let base = std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    base.join("ClearVox")
+    base.join("Sordino")
 }
 
 fn path() -> PathBuf {
@@ -66,7 +66,7 @@ impl Settings {
 }
 
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
-const RUN_VALUE: &str = "ClearVox";
+const RUN_VALUE: &str = "Sordino";
 
 pub fn launch_at_login() -> bool {
     use winreg::{enums::HKEY_CURRENT_USER, RegKey};
