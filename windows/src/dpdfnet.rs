@@ -85,7 +85,7 @@ fn model_bytes(size: Size) -> Result<std::borrow::Cow<'static, [u8]>> {
 type Plan = TypedRunnableModel;
 
 pub struct Dpdfnet {
-    plan: Arc<Plan>,
+    run: TypedSimpleState,
     init_state: Vec<f32>,
     state: Tensor,
     window: [f32; WIN],
@@ -96,7 +96,17 @@ pub struct Dpdfnet {
     scratch_in: Vec<f32>,
     spec: Vec<Complex<f32>>,
     time: Vec<f32>,
+    /// Idle skipping: consecutive hops quieter than `IDLE_RMS`, and the number of hops skipped so far.
+    quiet_run: u32,
+    pub skipped: u64,
+    pub skip_idle: bool,
 }
+
+/// Hops this quiet (RMS below about -66 dBFS, under any real speech) ...
+const IDLE_RMS: f32 = 5e-4;
+/// ... for this many in a row (250 ms) put the model to sleep. Its recurrent state is frozen, not
+/// reset: on near-silence it has settled to a fixed point anyway, so waking up continues seamlessly.
+const IDLE_HOPS: u32 = 25;
 
 impl Dpdfnet {
     pub fn new(size: Size) -> Result<Self> {
@@ -125,7 +135,16 @@ impl Dpdfnet {
         init_state[..erb_n].copy_from_slice(&erb_init);
         init_state[erb_n..erb_n + spec_n].copy_from_slice(&spec_init);
 
-        let plan = tract_onnx::onnx().model_for_proto_model(&proto)?.into_optimized()?.into_runnable()?;
+        let mut typed = tract_onnx::onnx().model_for_proto_model(&proto)?.into_optimized()?;
+        // The ONNX contract restarts every GRU from its initial state on each call; the model carries
+        // its own recurrence in the explicit state tensor. Say so, so one tract session can be reused.
+        for node in typed.nodes_mut() {
+            if let Some(g) = node.op_as_mut::<tract_onnx::tract_core::ops::gru_seq::GruSeq>() {
+                g.reset_every_turn = true;
+            }
+        }
+        let plan: Arc<Plan> = typed.into_runnable()?;
+        let run = plan.spawn()?;
 
         let mut window = [0.0f32; WIN];
         for (i, w) in window.iter_mut().enumerate() {
@@ -137,7 +156,7 @@ impl Dpdfnet {
         let inv = planner.plan_fft_inverse(WIN);
         let state = tensor1(&init_state);
         Ok(Self {
-            plan,
+            run,
             init_state,
             state,
             window,
@@ -148,6 +167,9 @@ impl Dpdfnet {
             scratch_in: vec![0.0; WIN],
             spec: vec![Complex::new(0.0, 0.0); BINS],
             time: vec![0.0; WIN],
+            quiet_run: 0,
+            skipped: 0,
+            skip_idle: true,
         })
     }
 
@@ -156,10 +178,24 @@ impl Dpdfnet {
         self.state = tensor1(&self.init_state);
         self.prev = [0.0; HOP];
         self.ola = [0.0; WIN];
+        self.quiet_run = 0;
     }
 
     /// Enhances one 10 ms hop. The output lags the input by one hop (10 ms).
     pub fn process(&mut self, input: &[f32; HOP], output: &mut [f32; HOP]) -> Result<()> {
+        if self.skip_idle {
+            let rms = (input.iter().map(|s| s * s).sum::<f32>() / HOP as f32).sqrt();
+            self.quiet_run = if rms < IDLE_RMS { self.quiet_run.saturating_add(1) } else { 0 };
+            if self.quiet_run > IDLE_HOPS {
+                // Asleep: play out the tail of the last frame, then silence. Keep `prev` current so the
+                // first frame after waking has the right left half.
+                output.copy_from_slice(&self.ola[..HOP]);
+                self.ola.fill(0.0);
+                self.prev = *input;
+                self.skipped += 1;
+                return Ok(());
+            }
+        }
         self.scratch_in[..HOP].copy_from_slice(&self.prev);
         self.scratch_in[HOP..].copy_from_slice(input);
         self.prev = *input;
@@ -174,7 +210,7 @@ impl Dpdfnet {
         }
         let ri = tract_ndarray::Array4::from_shape_vec((1, 1, BINS, 2), flat)?.into_tensor();
         let state = std::mem::replace(&mut self.state, Tensor::zero::<f32>(&[1])?);
-        let mut outs = self.plan.run(tvec!(ri.into_tvalue(), state.into_tvalue()))?;
+        let mut outs = self.run.run(tvec!(ri.into_tvalue(), state.into_tvalue()))?;
         let next_state = outs.pop().ok_or_else(|| anyhow!("no state output"))?;
         let spec_e = outs.pop().ok_or_else(|| anyhow!("no spec output"))?;
         self.state = next_state.into_tensor();
