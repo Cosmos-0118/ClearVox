@@ -1,6 +1,6 @@
 // Per-frame cost of the denoiser: cargo run --release --example bench -- [dpdfnet2|dpdfnet8] [seconds]
-use clearvox::dpdfnet::{Dpdfnet, Size, HOP};
-use clearvox::wavio;
+use sordino::dpdfnet::{Dpdfnet, Size, HOP};
+use sordino::wavio;
 use std::time::Instant;
 #[allow(deprecated)]
 fn ftz() {

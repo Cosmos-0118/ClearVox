@@ -1,6 +1,6 @@
 // Compares DPDFNet with and without idle skipping on WAV files.
-use clearvox::dpdfnet::{Dpdfnet, Size, HOP};
-use clearvox::wavio;
+use sordino::dpdfnet::{Dpdfnet, Size, HOP};
+use sordino::wavio;
 fn run(x: &[f32], skip: bool) -> (Vec<f32>, u64) {
     let mut d = Dpdfnet::new(Size::Eight).unwrap();
     d.skip_idle = skip;
