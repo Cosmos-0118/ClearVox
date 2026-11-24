@@ -87,7 +87,8 @@ type Plan = TypedRunnableModel;
 pub struct Dpdfnet {
     run: TypedSimpleState,
     init_state: Vec<f32>,
-    state: Tensor,
+    state: Option<Tensor>,
+    in_tensor: Arc<Tensor>,
     window: [f32; WIN],
     fwd: Arc<dyn RealToComplex<f32>>,
     inv: Arc<dyn ComplexToReal<f32>>,
@@ -102,11 +103,12 @@ pub struct Dpdfnet {
     pub skip_idle: bool,
 }
 
-/// Hops this quiet (RMS below about -66 dBFS, under any real speech) ...
-const IDLE_RMS: f32 = 5e-4;
-/// ... for this many in a row (250 ms) put the model to sleep. Its recurrent state is frozen, not
+/// Hops this quiet (RMS below about -80 dBFS, true digital silence / muted mic; low enough that
+/// soft whispers on quiet mics never put the model to sleep) ...
+const IDLE_RMS: f32 = 1e-4;
+/// ... for this many in a row (500 ms) put the model to sleep. Its recurrent state is frozen, not
 /// reset: on near-silence it has settled to a fixed point anyway, so waking up continues seamlessly.
-const IDLE_HOPS: u32 = 25;
+const IDLE_HOPS: u32 = 50;
 
 impl Dpdfnet {
     pub fn new(size: Size) -> Result<Self> {
@@ -154,11 +156,13 @@ impl Dpdfnet {
         let mut planner = RealFftPlanner::<f32>::new();
         let fwd = planner.plan_fft_forward(WIN);
         let inv = planner.plan_fft_inverse(WIN);
-        let state = tensor1(&init_state);
+        let state = Some(tensor1(&init_state));
+        let in_tensor = Arc::new(Tensor::zero::<f32>(&[1, 1, BINS, 2])?);
         Ok(Self {
             run,
             init_state,
             state,
+            in_tensor,
             window,
             fwd,
             inv,
@@ -175,7 +179,7 @@ impl Dpdfnet {
 
     /// Back to a clean stream (used when the denoiser is re-enabled after a long gap).
     pub fn reset(&mut self) {
-        self.state = tensor1(&self.init_state);
+        self.state = Some(tensor1(&self.init_state));
         self.prev = [0.0; HOP];
         self.ola = [0.0; WIN];
         self.quiet_run = 0;
@@ -203,17 +207,20 @@ impl Dpdfnet {
             self.scratch_in[i] *= self.window[i];
         }
         self.fwd.process(&mut self.scratch_in, &mut self.spec).map_err(|e| anyhow!("fft: {e}"))?;
-        let mut flat = Vec::with_capacity(BINS * 2);
-        for c in &self.spec {
-            flat.push(c.re);
-            flat.push(c.im);
+        {
+            let t = Arc::make_mut(&mut self.in_tensor);
+            let mut view = t.to_plain_array_view_mut::<f32>()?;
+            let dst = view.as_slice_mut().ok_or_else(|| anyhow!("non-contiguous input tensor"))?;
+            for (i, c) in self.spec.iter().enumerate() {
+                dst[i * 2] = c.re;
+                dst[i * 2 + 1] = c.im;
+            }
         }
-        let ri = tract_ndarray::Array4::from_shape_vec((1, 1, BINS, 2), flat)?.into_tensor();
-        let state = std::mem::replace(&mut self.state, Tensor::zero::<f32>(&[1])?);
-        let mut outs = self.run.run(tvec!(ri.into_tvalue(), state.into_tvalue()))?;
+        let state = self.state.take().unwrap_or_else(|| tensor1(&self.init_state));
+        let mut outs = self.run.run(tvec!(self.in_tensor.clone().into_tvalue(), state.into_tvalue()))?;
         let next_state = outs.pop().ok_or_else(|| anyhow!("no state output"))?;
         let spec_e = outs.pop().ok_or_else(|| anyhow!("no spec output"))?;
-        self.state = next_state.into_tensor();
+        self.state = Some(next_state.into_tensor());
         let spec_e = spec_e.into_tensor();
         let view = spec_e.to_plain_array_view::<f32>()?;
         if view.len() != BINS * 2 {

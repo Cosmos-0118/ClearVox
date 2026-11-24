@@ -12,6 +12,7 @@ pub struct Settings {
     /// Endpoint ID of the virtual cable's playback side.
     pub output_id: String,
     pub denoise: bool,
+    pub gate: bool,
     pub highpass: bool,
     pub limiter: bool,
     pub agc: bool,
@@ -29,6 +30,7 @@ impl Default for Settings {
             input_id: String::new(),
             output_id: String::new(),
             denoise: true,
+            gate: true,
             highpass: true,
             limiter: true,
             agc: true,

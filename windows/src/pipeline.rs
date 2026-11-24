@@ -148,10 +148,132 @@ fn f32_from_bytes(bytes: &[u8], out: &mut Vec<f32>) {
     out.extend(bytes.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])));
 }
 
+/// Flushes x86 subnormal (denormal) floats to zero on this thread so silent/quiet passages don't
+/// trigger 10x CPU spikes inside GRU / biquad IIR filters while gaming.
+fn enable_ftz_daz() {
+    #[cfg(target_arch = "x86_64")]
+    #[allow(deprecated)]
+    unsafe {
+        use std::arch::x86_64::{_mm_getcsr, _mm_setcsr};
+        // Bit 15 = FTZ (Flush-To-Zero), Bit 6 = DAZ (Denormals-Are-Zero).
+        _mm_setcsr(_mm_getcsr() | 0x8040);
+    }
+}
+
+/// Elevates an audio worker thread via Windows MMCSS ("Pro Audio") so heavy game loads don't
+/// preempt capture/render and cause buffer underruns.
+struct ProAudioGuard(Option<windows::Win32::Foundation::HANDLE>);
+
+impl ProAudioGuard {
+    fn enter() -> Self {
+        use windows::core::w;
+        use windows::Win32::System::Threading::AvSetMmThreadCharacteristicsW;
+        let mut idx = 0u32;
+        let h = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut idx) }.ok();
+        Self(h)
+    }
+}
+
+impl Drop for ProAudioGuard {
+    fn drop(&mut self) {
+        if let Some(h) = self.0.take() {
+            unsafe {
+                let _ = windows::Win32::System::Threading::AvRevertMmThreadCharacteristics(h);
+            }
+        }
+    }
+}
+
+/// Downmixes multi-channel WASAPI capture without throwing away 6 dB on 1-mic / 2-ch interfaces.
+/// If one channel dominates (e.g. mono XLR/USB mic on Ch 1, dead Ch 2), smoothly selects the
+/// active channel at unity gain; otherwise averages balanced channels.
+struct Downmixer {
+    channels: usize,
+    power: Vec<f32>,
+    weights: Vec<f32>,
+}
+
+impl Downmixer {
+    fn new(channels: usize) -> Self {
+        let ch = channels.max(1);
+        Self { channels: ch, power: vec![0.0; ch], weights: vec![1.0 / ch as f32; ch] }
+    }
+
+    fn mix(&mut self, bytes: &[u8], out: &mut Vec<f32>) {
+        if self.channels == 1 {
+            f32_from_bytes(bytes, out);
+            return;
+        }
+        let ch = self.channels;
+        let stride = ch * 4;
+        let frames = bytes.len() / stride;
+        out.clear();
+        out.reserve(frames);
+
+        // Estimate per-channel energy over this packet.
+        let mut pkt_e = [0.0f32; 8];
+        let use_ch = ch.min(8);
+        for f in 0..frames {
+            let base = f * stride;
+            for c in 0..use_ch {
+                let o = base + c * 4;
+                let s = f32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+                if s.is_finite() {
+                    pkt_e[c] += s * s;
+                }
+            }
+        }
+        if frames > 0 {
+            for c in 0..use_ch {
+                let mean = pkt_e[c] / frames as f32;
+                self.power[c] += (mean - self.power[c]) * 0.05;
+            }
+        }
+
+        // If one channel is >12 dB (16x power) louder than the rest, pick it at unity (+6 dB win).
+        let (mut best_c, mut best_p) = (0usize, 0.0f32);
+        let mut sum_p = 0.0f32;
+        for c in 0..use_ch {
+            sum_p += self.power[c];
+            if self.power[c] > best_p {
+                best_p = self.power[c];
+                best_c = c;
+            }
+        }
+        let others = (sum_p - best_p).max(0.0);
+        let solo = best_p > 1e-10 && best_p > others * 16.0;
+
+        let mut target = [0.0f32; 8];
+        if solo {
+            target[best_c] = 1.0;
+        } else {
+            let w = 1.0 / use_ch as f32;
+            for c in 0..use_ch {
+                target[c] = w;
+            }
+        }
+        for c in 0..use_ch {
+            self.weights[c] += (target[c] - self.weights[c]) * 0.1;
+        }
+
+        for f in 0..frames {
+            let base = f * stride;
+            let mut acc = 0.0f32;
+            for c in 0..use_ch {
+                let o = base + c * 4;
+                let s = f32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
+                acc += s * self.weights[c];
+            }
+            out.push(acc);
+        }
+    }
+}
+
 // ---------------------------------------------------------------- render (virtual mic)
 
 fn render_thread(shared: Arc<Shared>, id: String, ready: mpsc::Sender<Result<(), String>>) {
     let _ = wasapi::initialize_mta();
+    let _mmcss = ProAudioGuard::enter();
     let result = (|| -> Result<_, String> {
         let en = DeviceEnumerator::new().map_err(|e| format!("Audio system unavailable: {e}"))?;
         let dev = en.get_device(&id).map_err(|_| "The virtual mic is no longer available. Is VB-CABLE installed?".to_string())?;
@@ -224,6 +346,8 @@ fn render_thread(shared: Arc<Shared>, id: String, ready: mpsc::Sender<Result<(),
 
 fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params>, engine: dsp::Engine, ready: mpsc::Sender<Result<(), String>>) {
     let _ = wasapi::initialize_mta();
+    enable_ftz_daz();
+    let _mmcss = ProAudioGuard::enter();
     let result = (|| -> Result<_, String> {
         let en = DeviceEnumerator::new().map_err(|e| format!("Audio system unavailable: {e}"))?;
         let dev = match &input {
@@ -238,7 +362,10 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
             return Err(format!("\"{name}\" is a virtual mic. Pick your real microphone in Sordino."));
         }
         let mut client = dev.get_iaudioclient().map_err(|e| format!("Couldn't open the microphone: {e}"))?;
-        let fmt = WaveFormat::new(32, 32, SampleType::Float, SAMPLE_RATE as usize, 1, None);
+        // Preserve native channel count (up to 8) so 1-mic / 2-ch USB/XLR interfaces don't lose 6 dB
+        // to Windows' blind (L+R)/2 mono downmix.
+        let ch = client.get_mixformat().map(|f| (f.get_nchannels() as usize).clamp(1, 8)).unwrap_or(1);
+        let fmt = WaveFormat::new(32, 32, SampleType::Float, SAMPLE_RATE as usize, ch, None);
         let (period, _) = client.get_device_period().map_err(|e| e.to_string())?;
         client
             .initialize_client(&fmt, Direction::Capture, StreamMode::EventsShared { autoconvert: true, buffer_duration_hns: period.max(200_000) }, None)
@@ -246,10 +373,10 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
         let event = client.set_get_eventhandle().map_err(|e| e.to_string())?;
         let cap = client.get_audiocaptureclient().map_err(|e| e.to_string())?;
         client.start_stream().map_err(|e| e.to_string())?;
-        Ok((client, event, cap))
+        Ok((client, event, cap, ch))
     })();
 
-    let (client, event, cap) = match result {
+    let (client, event, cap, ch) = match result {
         Ok(v) => {
             let _ = ready.send(Ok(()));
             v
@@ -261,7 +388,8 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
     };
 
     let mut chain = Chain::with_engine(params, 90.0, engine);
-    let mut raw: Vec<u8> = vec![0; 48_000 * 4]; // up to 1 s per read
+    let mut downmix = Downmixer::new(ch);
+    let mut raw: Vec<u8> = vec![0; 48_000 * 4 * ch]; // up to 1 s per read
     let mut samples: Vec<f32> = Vec::new();
     let mut processed: Vec<f32> = Vec::new();
     while !shared.stop.load(Relaxed) {
@@ -279,7 +407,7 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
             }
             match cap.read_from_device(&mut raw) {
                 Ok((frames, _)) if frames > 0 => {
-                    f32_from_bytes(&raw[..frames as usize * 4], &mut samples);
+                    downmix.mix(&raw[..frames as usize * ch * 4], &mut samples);
                     processed.clear();
                     chain.process(&samples, &mut processed);
                     if !processed.is_empty() {
@@ -300,6 +428,7 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
 
 /// Plays a prepared sample buffer through the DSP chain in real time (test/diagnostic source).
 fn file_source_thread(shared: Arc<Shared>, samples: Arc<Vec<f32>>, params: Arc<Params>, engine: dsp::Engine, ready: mpsc::Sender<Result<(), String>>) {
+    enable_ftz_daz();
     let _ = ready.send(Ok(()));
     let mut chain = Chain::with_engine(params, 90.0, engine);
     let mut out = Vec::new();

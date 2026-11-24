@@ -57,6 +57,7 @@ pub fn run() -> anyhow::Result<()> {
 
     let st = Settings::load();
     let params = Params::new(st.denoise, st.highpass, st.limiter, st.agc);
+    params.gate.store(st.gate, Relaxed);
     let tray = TrayIconBuilder::new()
         .with_icon(icon::render(false, false, 0.0))
         .with_tooltip("Sordino")
@@ -356,6 +357,11 @@ impl App {
                 self.params.denoise.store(self.st.denoise, Relaxed);
                 self.save();
             }
+            "opt:gate" => {
+                self.st.gate = !self.st.gate;
+                self.params.gate.store(self.st.gate, Relaxed);
+                self.save();
+            }
             id if id.starts_with("engine:") => {
                 self.st.engine = id["engine:".len()..].to_string();
                 self.save();
@@ -463,6 +469,7 @@ impl App {
         }
         let _ = menu.append(&eng);
         let _ = menu.append(&opt("opt:highpass", "Reduce Air Thumps", self.st.highpass));
+        let _ = menu.append(&opt("opt:gate", "Silence Gate", self.st.gate));
         let _ = menu.append(&opt("opt:limiter", "Peak Limiter", self.st.limiter));
         let _ = menu.append(&opt("opt:agc", "Auto Gain", self.st.agc));
         let _ = menu.append(&opt("opt:default", "Use as Default Mic", self.st.use_as_default));

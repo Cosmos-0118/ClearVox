@@ -53,8 +53,9 @@ when off, amber on an error, and its microphone fills up as you speak.
 | **Noise Suppression** | The neural denoiser. Turn off to hear the difference. |
 | **Voice Engine** | *Best quality* (DPDFNet-8, default, roughly half a CPU core), *Lighter on CPU* (DPDFNet-2) or *Minimal* (RNNoise: tiny, but it garbles speech under loud close noise such as a fan). |
 | **Reduce Air Thumps** | 90 Hz high-pass: rumble, desk bumps, breath pops. |
-| **Peak Limiter** | Stops sudden loud sounds clipping. |
-| **Auto Gain** | Evens out your level while you talk (up to +18 dB; quiet words are lifted so they do not sink). |
+| **Silence Gate** | Neural-VAD gate that drops residual noise to exact digital silence when you stop speaking, preventing voice-chat indicators (e.g. Valorant) from flashing. |
+| **Peak Limiter** | 4 ms look-ahead limiter that stops sudden loud sounds from clipping. |
+| **Auto Gain** | dB-domain leveler and fast upward compressor (up to +30 dB total boost while speaking) that lifts whispers and soft words without pumping silence. |
 | **Use as Default Mic** | Makes *CABLE Output* the Windows default recording device while Sordino runs, so apps pick it automatically. Your real default is restored when you quit. |
 | **Open at Login** | Starts Sordino when you sign in. |
 
@@ -124,7 +125,7 @@ the whole path. `tests/analyze.py` compares loudness before/after for any pair o
 
 | File | Role |
 | --- | --- |
-| `src/dsp.rs` | High-pass, engine selection, gate (RNNoise only), auto gain, limiter |
+| `src/dsp.rs` | High-pass, pre-leveler & whisper rescue, engine selection, neural-VAD silence gate, AGC2, 4 ms limiter |
 | `src/dpdfnet.rs` | DPDFNet streaming inference (STFT + `tract` ONNX) |
 | `models/` | The DPDFNet ONNX models (published as release assets, installed by `install.ps1`) and their licence |
 | `tests/bench/` | Python scripts that compared candidate denoisers |

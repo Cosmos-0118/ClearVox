@@ -170,8 +170,9 @@ On Windows the icon is green when on, grey when off, amber on an error, and its 
 | **Voice Isolation** *(Mac)* | Apple's strongest noise removal. Best with headphones. |
 | **Voice Processing** *(Mac)* | Noise removal plus echo cancellation. Use on laptop speakers. |
 | **Reduce Air Thumps** | 90 Hz high-pass: rumble, desk bumps, breath pops. |
+| **Silence Gate** *(Windows)* | Mutes residual mic noise cleanly to true digital silence when you stop speaking so game voice indicators (e.g. Valorant) don't flash. |
 | **Peak Limiter** | Stops sudden loud sounds from clipping. |
-| **Auto Gain** | Evens out your level while you talk. |
+| **Auto Gain** | Evens out your level while you talk and boosts whispers and soft voices cleanly. |
 | **Use as Default Mic** | Makes the virtual mic the system default while Sordino runs, so apps pick it up automatically. Your real default is restored when you quit. |
 | **Open at Login** | Starts Sordino when you sign in. |
 

@@ -216,3 +216,87 @@ fn streaming_in_odd_chunks_matches_one_shot() {
         assert!((out[i] - one[i]).abs() < 1e-5, "mismatch at {i}");
     }
 }
+
+#[test]
+fn post_speech_silence_has_no_vox_leak_with_agc() {
+    // Reproduces the Valorant VOX flashing bug: speech followed by room fan + clicks with AGC ON.
+    let clean = fixture("clean.wav");
+    let fan = fixture("noise_fan.wav");
+    let clicks = fixture("noise_clicks.wav");
+    let mask = speech_mask(&clean);
+    let n = clean.len().min(fan.len()).min(clicks.len());
+    let gf = noise_gain(&clean[..n], &fan[..n], &mask, 8.0);
+    let gc = noise_gain(&clean[..n], &clicks[..n], &mask, 10.0);
+
+    // Append 3 s of pure noise tail after speech so the gate has closed and settled.
+    let mut noisy: Vec<f32> = (0..n).map(|i| clean[i] + fan[i] * gf + clicks[i] * gc).collect();
+    let tail_len = SR * 3;
+    for i in 0..tail_len {
+        let j = (n - tail_len + i) % n;
+        noisy.push(fan[j] * gf + clicks[j] * gc);
+    }
+
+    let params = dsp::Params::new(true, true, true, true); // AGC ON, Gate ON (shipped defaults)
+    let out = dsp::process_buffer_engine(params, &noisy, 90.0, dsp::Engine::Dpdfnet2);
+
+    // Check the last 2 seconds of noise-only tail: worst 20 ms frame peak must sit well below
+    // any game VOX threshold (e.g. Valorant ~ -45 dBFS).
+    let tail = &out[out.len() - SR * 2..out.len() - SR / 5];
+    let max_frame_peak = tail
+        .chunks(SR / 50)
+        .map(|c| c.iter().fold(0.0f32, |m, s| m.max(s.abs())))
+        .fold(0.0f32, f32::max);
+    let peak_db = db(max_frame_peak as f64);
+    println!("post-speech tail max 20 ms peak (AGC ON, DPDFNet2): {peak_db:.1} dBFS");
+    assert!(peak_db < -65.0, "post-speech noise leaked at {peak_db:.1} dBFS (would trigger VOX)");
+}
+
+#[test]
+fn quiet_whisper_is_preserved_and_lifted_by_agc() {
+    // Simulate a very quiet voice / whisper (-28 dB quieter than normal speech, ~ -48 dBFS)
+    // in a quiet room (~ -58 dBFS pink floor).
+    let clean = fixture("clean.wav");
+    let pink = fixture("noise_pink.wav");
+    let mask = speech_mask(&clean);
+    let n = clean.len().min(pink.len());
+    let whisper_scale = 10f32.powf(-28.0 / 20.0);
+    let noise_scale = 10f32.powf(-38.0 / 20.0);
+    let noisy: Vec<f32> = (0..n).map(|i| clean[i] * whisper_scale + pink[i] * noise_scale).collect();
+
+    let in_speech_db = db(rms(&masked(&noisy, &mask, true)));
+    let params = dsp::Params::new(true, true, true, true);
+    let out = dsp::process_buffer_engine(params, &noisy, 90.0, dsp::Engine::Dpdfnet2);
+    let out_speech_db = db(rms(&masked(&out[..n], &mask, true)));
+    let tail = &out[n - SR..n - SR / 5];
+    let tail_peak_db = db(tail.iter().fold(0.0f32, |m, s| m.max(s.abs())) as f64);
+
+    println!("quiet/whisper: in {in_speech_db:.1} -> out {out_speech_db:.1} dBFS (lift {:+.1} dB) | tail peak {tail_peak_db:.1} dBFS", out_speech_db - in_speech_db);
+    assert!(out_speech_db > -28.0, "whisper remained too quiet at {out_speech_db:.1} dBFS");
+    assert!(out_speech_db - in_speech_db > 15.0, "AGC did not lift whisper enough ({:+.1} dB)", out_speech_db - in_speech_db);
+    assert!(tail_peak_db < -65.0, "whisper AGC pumped silence tail to {tail_peak_db:.1} dBFS");
+}
+
+#[test]
+fn whisper_to_shout_stays_below_limiter_ceiling() {
+    let clean = fixture("clean.wav");
+    let mask = speech_mask(&clean);
+    // Start at the first active speech frame (skipping the leading silence in clean.wav).
+    let start = mask.iter().position(|&m| m).unwrap_or(0) * (SR / 50);
+    let n = (SR * 2).min(clean.len() - start);
+    let speech = &clean[start..start + n];
+    let mut x = Vec::with_capacity(n * 2);
+    // 2 s of whisper (-28 dB) so AGC boosts strongly, immediately followed by loud shout (+8 dB).
+    let w = 10f32.powf(-28.0 / 20.0);
+    for &s in speech {
+        x.push(s * w);
+    }
+    for &s in speech {
+        x.push((s * 2.5).clamp(-0.98, 0.98));
+    }
+    let out = dsp::process_buffer_engine(dsp::Params::new(true, true, true, true), &x, 90.0, dsp::Engine::Dpdfnet2);
+    assert!(out.iter().all(|s| s.is_finite()));
+    let peak = out.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    println!("whisper->shout peak: {peak:.4} ({:.2} dBFS)", db(peak as f64));
+    assert!(peak > 0.3, "whisper->shout unexpectedly silent: {peak}");
+    assert!(peak <= 0.92, "limiter allowed overshoot during whisper->shout: {peak}");
+}
