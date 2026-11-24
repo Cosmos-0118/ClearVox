@@ -110,44 +110,61 @@ const IDLE_RMS: f32 = 1e-4;
 /// reset: on near-silence it has settled to a fixed point anyway, so waking up continues seamlessly.
 const IDLE_HOPS: u32 = 50;
 
+/// Parses and optimizes the model. This is the expensive step (hundreds of ms of CPU), so it is
+/// done once per model size and process: restarts (device changes, retries after boot) reuse it
+/// instead of burning CPU each time, which starves other apps' audio threads.
+fn cached_plan(size: Size) -> Result<(Arc<Plan>, Vec<f32>)> {
+    static CACHE: std::sync::Mutex<Vec<(Size, Arc<Plan>, Vec<f32>)>> = std::sync::Mutex::new(Vec::new());
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, p, i)) = cache.iter().find(|(s, _, _)| *s == size) {
+        return Ok((p.clone(), i.clone()));
+    }
+    let bytes = model_bytes(size)?;
+    let proto = tract_onnx::onnx().proto_model_for_read(&mut &bytes[..])?;
+    let meta = |key: &str| -> Result<String> {
+        proto
+            .metadata_props
+            .iter()
+            .find(|e| e.key == key)
+            .map(|e| e.value.clone())
+            .ok_or_else(|| anyhow!("model metadata '{key}' missing"))
+    };
+    let floats = |s: String| -> Result<Vec<f32>> {
+        s.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| e.into())).collect()
+    };
+    let state_size: usize = meta("state_size")?.parse()?;
+    let erb_n: usize = meta("erb_norm_state_size")?.parse()?;
+    let spec_n: usize = meta("spec_norm_state_size")?.parse()?;
+    let erb_init = floats(meta("erb_norm_init")?)?;
+    let spec_init = floats(meta("spec_norm_init")?)?;
+    if erb_init.len() != erb_n || spec_init.len() != spec_n || erb_n + spec_n > state_size {
+        bail!("inconsistent DPDFNet state metadata");
+    }
+    let mut init_state = vec![0.0f32; state_size];
+    init_state[..erb_n].copy_from_slice(&erb_init);
+    init_state[erb_n..erb_n + spec_n].copy_from_slice(&spec_init);
+
+    let mut typed = tract_onnx::onnx().model_for_proto_model(&proto)?.into_optimized()?;
+    // The ONNX contract restarts every GRU from its initial state on each call; the model carries
+    // its own recurrence in the explicit state tensor. Say so, so one tract session can be reused.
+    for node in typed.nodes_mut() {
+        if let Some(g) = node.op_as_mut::<tract_onnx::tract_core::ops::gru_seq::GruSeq>() {
+            g.reset_every_turn = true;
+        }
+    }
+    let plan: Arc<Plan> = typed.into_runnable()?;
+    cache.push((size, plan.clone(), init_state.clone()));
+    Ok((plan, init_state))
+}
+
 impl Dpdfnet {
     pub fn new(size: Size) -> Result<Self> {
-        let bytes = model_bytes(size)?;
-        let proto = tract_onnx::onnx().proto_model_for_read(&mut &bytes[..])?;
-        let meta = |key: &str| -> Result<String> {
-            proto
-                .metadata_props
-                .iter()
-                .find(|e| e.key == key)
-                .map(|e| e.value.clone())
-                .ok_or_else(|| anyhow!("model metadata '{key}' missing"))
-        };
-        let floats = |s: String| -> Result<Vec<f32>> {
-            s.split(',').map(|x| x.trim().parse::<f32>().map_err(|e| e.into())).collect()
-        };
-        let state_size: usize = meta("state_size")?.parse()?;
-        let erb_n: usize = meta("erb_norm_state_size")?.parse()?;
-        let spec_n: usize = meta("spec_norm_state_size")?.parse()?;
-        let erb_init = floats(meta("erb_norm_init")?)?;
-        let spec_init = floats(meta("spec_norm_init")?)?;
-        if erb_init.len() != erb_n || spec_init.len() != spec_n || erb_n + spec_n > state_size {
-            bail!("inconsistent DPDFNet state metadata");
-        }
-        let mut init_state = vec![0.0f32; state_size];
-        init_state[..erb_n].copy_from_slice(&erb_init);
-        init_state[erb_n..erb_n + spec_n].copy_from_slice(&spec_init);
-
-        let mut typed = tract_onnx::onnx().model_for_proto_model(&proto)?.into_optimized()?;
-        // The ONNX contract restarts every GRU from its initial state on each call; the model carries
-        // its own recurrence in the explicit state tensor. Say so, so one tract session can be reused.
-        for node in typed.nodes_mut() {
-            if let Some(g) = node.op_as_mut::<tract_onnx::tract_core::ops::gru_seq::GruSeq>() {
-                g.reset_every_turn = true;
-            }
-        }
-        let plan: Arc<Plan> = typed.into_runnable()?;
+        let (plan, init_state) = cached_plan(size)?;
         let run = plan.spawn()?;
+        Self::with_run(run, init_state)
+    }
 
+    fn with_run(run: TypedSimpleState, init_state: Vec<f32>) -> Result<Self> {
         let mut window = [0.0f32; WIN];
         for (i, w) in window.iter_mut().enumerate() {
             let s = (0.5 * PI * (i as f32 + 0.5) / (WIN as f32 / 2.0)).sin();

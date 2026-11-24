@@ -364,10 +364,12 @@ fn render_thread(shared: Arc<Shared>, id: String, ready: mpsc::Sender<Result<(),
 fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params>, engine: dsp::Engine, ready: mpsc::Sender<Result<(), String>>) {
     let _ = wasapi::initialize_mta();
     enable_ftz_daz();
-    let _mmcss = ProAudioGuard::enter();
     // Load the (slow) neural model first and only then open the mic, so the capture stream never
-    // sits unread while the model loads and "ready" really means audio is about to flow.
+    // sits unread while the model loads and "ready" really means audio is about to flow. This runs
+    // at normal priority: elevating it (MMCSS) would let a boot-time model load starve the audio
+    // threads of other apps (browser, games), which then play scrambled audio.
     let mut chain = Chain::with_engine(params, 90.0, engine);
+    let _mmcss = ProAudioGuard::enter();
     let result = (|| -> Result<_, String> {
         let en = DeviceEnumerator::new().map_err(|e| format!("Audio system unavailable: {e}"))?;
         let dev = match &input {
