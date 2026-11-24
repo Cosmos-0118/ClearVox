@@ -27,6 +27,14 @@ jobs:
           cd ../..
           shasum -a 256 Sordino.zip | tee Sordino.zip.sha256
 
+      # Hand-written notes live in .github/release-notes/<tag>.md (vx release notes --write); without
+      # one, fall back to GitHub's generated notes. Only this job sets the body, so it isn't duplicated.
+      - name: Release notes
+        id: notes
+        run: |
+          f=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ -f "$f" ]; then echo "file=$f" >> "$GITHUB_OUTPUT"; fi
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
@@ -34,7 +42,8 @@ jobs:
           files: |
             Sordino.zip
             Sordino.zip.sha256
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.file }}
+          generate_release_notes: ${{ steps.notes.outputs.file == '' }}
 
   windows:
     needs: build
@@ -66,5 +75,4 @@ jobs:
           files: |
             Sordino-windows.zip
             Sordino-windows.zip.sha256
-          generate_release_notes: true
 
