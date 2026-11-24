@@ -76,6 +76,14 @@ pub fn default_capture_id() -> Option<String> {
     en.get_default_device_for_role(Direction::Capture, Role::Console).ok()?.get_id().ok()
 }
 
+/// Current default capture endpoint (console role), if Windows has one.
+pub fn default_capture() -> Option<AudioDevice> {
+    let en = DeviceEnumerator::new().ok()?;
+    let dev = en.get_default_device_for_role(Direction::Capture, Role::Console).ok()?;
+    let (id, name) = (dev.get_id().ok()?, dev.get_friendlyname().ok()?);
+    Some(AudioDevice { is_virtual: is_virtual_name(&name), id, name, direction: DirectionKind::Capture })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -39,7 +39,17 @@ struct App {
     fails: u32,
     own_default_change: Instant,
     menu_dirty: bool,
+    started: Instant,
+    /// Virtual mic should become the default once the pipeline is actually delivering audio.
+    default_pending: bool,
+    /// A leftover virtual-mic default from a killed/shut-down run still has to be undone.
+    stale_pending: bool,
+    last_stale_check: Instant,
 }
+
+/// After launch, devices (USB mics, the VB-CABLE driver) may not be enumerated yet; during this
+/// window a missing saved device is waited for instead of being replaced and overwritten.
+const BOOT_GRACE: Duration = Duration::from_secs(60);
 
 pub fn run() -> anyhow::Result<()> {
     let _ = wasapi::initialize_mta();
@@ -77,6 +87,10 @@ pub fn run() -> anyhow::Result<()> {
         fails: 0,
         own_default_change: Instant::now() - Duration::from_secs(60),
         menu_dirty: true,
+        started: Instant::now(),
+        default_pending: false,
+        stale_pending: true,
+        last_stale_check: Instant::now() - Duration::from_secs(60),
     };
 
     event_loop.run(move |event, _, flow| {
@@ -84,7 +98,7 @@ pub fn run() -> anyhow::Result<()> {
         match event {
             Event::NewEvents(StartCause::Init) => {
                 app.refresh_devices();
-                app.cleanup_stale_default();
+                app.stale_pending = !app.cleanup_stale_default();
                 if app.st.enabled {
                     app.start();
                 }
@@ -104,8 +118,10 @@ pub fn run() -> anyhow::Result<()> {
             }
             Event::UserEvent(UserEvent::DevicesChanged) => {
                 app.refresh_devices();
+                // Boot / hot-plug produces bursts of events: debounce into one (re)start attempt
+                // instead of opening and closing streams for each, which makes games lose audio.
                 if app.st.enabled && app.pipe.is_none() {
-                    app.start();
+                    app.restart_at = Some(Instant::now() + Duration::from_millis(1500));
                 }
                 app.sync_ui();
             }
@@ -161,7 +177,11 @@ impl App {
             self.menu_dirty = true;
         }
         let mut changed = false;
-        if !self.mics.iter().any(|d| d.id == self.st.input_id) {
+        let grace = self.started.elapsed() < BOOT_GRACE;
+        // Never replace (and persist) a saved device because the list is empty or still filling
+        // up right after boot: that silently loses the user's choice.
+        let settle = |list_empty: bool, saved: &str| list_empty || (grace && !saved.is_empty());
+        if !self.mics.iter().any(|d| d.id == self.st.input_id) && !settle(self.mics.is_empty(), &self.st.input_id) {
             // Prefer what the user was using before Sordino moved the default, then the current
             // default if it is physical, then the first microphone.
             let prev = &self.st.previous_default_input_id;
@@ -177,7 +197,7 @@ impl App {
                 changed = true;
             }
         }
-        if !self.outs.iter().any(|d| d.id == self.st.output_id) {
+        if !self.outs.iter().any(|d| d.id == self.st.output_id) && !settle(self.outs.is_empty(), &self.st.output_id) {
             let pick = self
                 .outs
                 .iter()
@@ -217,14 +237,17 @@ impl App {
                 self.pipe = Some(p);
                 self.status = None;
                 self.fails = 0;
-                self.apply_default();
+                // Switch the Windows default only once audio really flows (see `tick`).
+                self.default_pending = true;
             }
             Err(e) => {
                 self.status = Some(e);
-                // Retry transient failures (device busy, Bluetooth mic reconnecting) with backoff.
-                // A missing virtual mic is retried when devices change instead.
-                if !self.st.output_id.is_empty() {
-                    self.schedule_restart();
+                // Retry with backoff: device busy, Bluetooth mic reconnecting, or (right after boot)
+                // the audio service / VB-CABLE driver not ready yet.
+                self.schedule_restart();
+                // Don't leave games on a dead virtual mic while we keep failing.
+                if self.fails >= 2 {
+                    self.restore_default();
                 }
             }
         }
@@ -264,6 +287,7 @@ impl App {
     }
 
     fn tick(&mut self) {
+        let mut apply = false;
         if let Some(p) = &self.pipe {
             let peak = p.take_peak();
             self.level = peak.max(self.level * 0.85);
@@ -273,9 +297,20 @@ impl App {
                 self.status = Some(err);
                 self.schedule_restart();
                 self.menu_dirty = true;
+            } else if self.default_pending && p.is_flowing() {
+                apply = true;
             }
         } else {
             self.level = 0.0;
+        }
+        if apply {
+            self.default_pending = false;
+            self.apply_default();
+        }
+        if self.stale_pending && self.last_stale_check.elapsed() >= Duration::from_secs(2) {
+            self.last_stale_check = Instant::now();
+            self.refresh_devices();
+            self.stale_pending = !self.cleanup_stale_default() && self.started.elapsed() < BOOT_GRACE;
         }
         if let Some(at) = self.restart_at {
             if Instant::now() >= at && self.st.enabled {
@@ -293,7 +328,7 @@ impl App {
 
     /// Makes the virtual mic the Windows default recording device so apps pick it automatically.
     fn apply_default(&mut self) {
-        if !self.st.use_as_default || self.pipe.is_none() {
+        if !self.st.use_as_default || !self.pipe.as_ref().is_some_and(|p| p.is_flowing()) {
             return;
         }
         let Some(cable) = self.cable_capture() else { return };
@@ -315,18 +350,29 @@ impl App {
         if devices::default_capture_id().as_deref() != Some(cable.id.as_str()) {
             return;
         }
-        let prev = self.st.previous_default_input_id.clone();
-        if let Some(d) = self.mics.iter().find(|d| d.id == prev) {
-            self.own_default_change = Instant::now();
-            let _ = defaultmic::set_default_capture(&d.id);
-        }
+        self.set_real_default();
     }
 
-    /// If a previous run was killed while the virtual mic was default, fix that on startup.
-    fn cleanup_stale_default(&mut self) {
-        if !self.st.use_as_default {
-            self.restore_default();
+    /// Sets the user's previous mic (or the first real one) as the Windows default.
+    fn set_real_default(&mut self) -> bool {
+        let prev = &self.st.previous_default_input_id;
+        let Some(d) = self.mics.iter().find(|d| d.id == *prev).or_else(|| self.mics.first()) else { return false };
+        self.own_default_change = Instant::now();
+        defaultmic::set_default_capture(&d.id).is_ok()
+    }
+
+    /// If a previous run was killed or Windows shut down while the virtual mic was the default,
+    /// no pipeline feeds it after the next boot: every app (games!) would get a dead microphone
+    /// until we are up. Undo that. Returns true when nothing is left to do.
+    fn cleanup_stale_default(&mut self) -> bool {
+        if self.pipe.is_some() {
+            return true;
         }
+        let Some(def) = devices::default_capture() else { return false };
+        if !def.is_virtual {
+            return true;
+        }
+        self.set_real_default()
     }
 
     /// Windows switches the default recording device by itself when a headset connects.

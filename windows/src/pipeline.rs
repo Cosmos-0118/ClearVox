@@ -9,7 +9,7 @@
 use crate::devices::is_virtual_name;
 use crate::dsp::{self, Chain, Params, SAMPLE_RATE};
 use crate::ring::RingBuffer;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::{Relaxed, Release}};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -29,6 +29,8 @@ pub struct Config {
 pub struct Shared {
     peak_bits: AtomicU32,
     stop: AtomicBool,
+    /// Set once the first processed audio has been written to the virtual mic.
+    flowing: AtomicBool,
     error: Mutex<Option<String>>,
     ring: RingBuffer,
 }
@@ -57,6 +59,7 @@ impl Pipeline {
         let shared = Arc::new(Shared {
             peak_bits: AtomicU32::new(0),
             stop: AtomicBool::new(false),
+            flowing: AtomicBool::new(false),
             error: Mutex::new(None),
             ring: RingBuffer::new(SAMPLE_RATE),
         });
@@ -68,7 +71,7 @@ impl Pipeline {
             let (sh, tx, id) = (shared.clone(), tx.clone(), cfg.output_id.clone());
             threads.push(thread::Builder::new().name("sordino-render".into()).spawn(move || render_thread(sh, id, tx)).unwrap());
         }
-        match rx.recv_timeout(Duration::from_secs(5)) {
+        match rx.recv_timeout(Duration::from_secs(10)) {
             Ok(Ok(())) => {}
             Ok(Err(e)) => return Err(abort(shared, threads, e)),
             Err(_) => return Err(abort(shared, threads, "Timed out opening the virtual mic".into())),
@@ -87,7 +90,9 @@ impl Pipeline {
                     .unwrap(),
             );
         }
-        match rx.recv_timeout(Duration::from_secs(5)) {
+        // The capture thread loads the neural model before opening the mic; right after a reboot
+        // (cold disk, busy CPU) that can take several seconds.
+        match rx.recv_timeout(Duration::from_secs(30)) {
             Ok(Ok(())) => {}
             Ok(Err(e)) => return Err(abort(shared, threads, e)),
             Err(_) => return Err(abort(shared, threads, "Timed out opening the microphone".into())),
@@ -102,7 +107,19 @@ impl Pipeline {
 
     /// Set once a device disappears or a stream fails; the owner should stop and rebuild.
     pub fn error(&self) -> Option<String> {
-        self.shared.error.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        if let Some(e) = self.shared.error.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+            return Some(e);
+        }
+        // An audio thread that died (panic) without reporting would leave a silent virtual mic.
+        if !self.shared.stop.load(Relaxed) && self.threads.iter().any(|t| t.is_finished()) {
+            return Some("Audio thread stopped unexpectedly".into());
+        }
+        None
+    }
+
+    /// True once cleaned audio is actually reaching the virtual mic (model loaded, mic streaming).
+    pub fn is_flowing(&self) -> bool {
+        self.shared.flowing.load(Relaxed)
     }
 
     /// (underruns, overflows) of the capture->render ring buffer.
@@ -348,6 +365,9 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
     let _ = wasapi::initialize_mta();
     enable_ftz_daz();
     let _mmcss = ProAudioGuard::enter();
+    // Load the (slow) neural model first and only then open the mic, so the capture stream never
+    // sits unread while the model loads and "ready" really means audio is about to flow.
+    let mut chain = Chain::with_engine(params, 90.0, engine);
     let result = (|| -> Result<_, String> {
         let en = DeviceEnumerator::new().map_err(|e| format!("Audio system unavailable: {e}"))?;
         let dev = match &input {
@@ -387,7 +407,6 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
         }
     };
 
-    let mut chain = Chain::with_engine(params, 90.0, engine);
     let mut downmix = Downmixer::new(ch);
     let mut raw: Vec<u8> = vec![0; 48_000 * 4 * ch]; // up to 1 s per read
     let mut samples: Vec<f32> = Vec::new();
@@ -413,6 +432,7 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
                     if !processed.is_empty() {
                         shared.ring.write(&processed);
                         bump_peak(&shared, chain.peak);
+                        shared.flowing.store(true, Release);
                     }
                 }
                 Ok(_) => break,
@@ -429,8 +449,8 @@ fn capture_thread(shared: Arc<Shared>, input: Option<String>, params: Arc<Params
 /// Plays a prepared sample buffer through the DSP chain in real time (test/diagnostic source).
 fn file_source_thread(shared: Arc<Shared>, samples: Arc<Vec<f32>>, params: Arc<Params>, engine: dsp::Engine, ready: mpsc::Sender<Result<(), String>>) {
     enable_ftz_daz();
-    let _ = ready.send(Ok(()));
     let mut chain = Chain::with_engine(params, 90.0, engine);
+    let _ = ready.send(Ok(()));
     let mut out = Vec::new();
     let chunk = dsp::FRAME;
     let start = std::time::Instant::now();
@@ -445,6 +465,7 @@ fn file_source_thread(shared: Arc<Shared>, samples: Arc<Vec<f32>>, params: Arc<P
             if !out.is_empty() {
                 shared.ring.write(&out);
                 bump_peak(&shared, chain.peak);
+                shared.flowing.store(true, Release);
             }
             pos = end;
         }
