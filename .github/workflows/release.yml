@@ -1,7 +1,7 @@
 name: Release
 
 # Push a tag like v1.0.0 to build Sordino.app (macOS) and Sordino-windows.zip (Windows) and attach
-# them to a GitHub release. install.sh / install.ps1 download these, so users need no compilers.
+# them to a GitHub release. Voice models are not part of it: see models.yml (models-vN tags). install.sh / install.ps1 download these, so users need no compilers.
 on:
   push:
     tags: ["v*"]
@@ -58,12 +58,6 @@ jobs:
           Compress-Archive -Path pkg/sordino.exe -DestinationPath Sordino-windows.zip
           $h = (Get-FileHash Sordino-windows.zip -Algorithm SHA256).Hash.ToLower()
           "$h  Sordino-windows.zip" | Tee-Object Sordino-windows.zip.sha256
-          # Models are separate release assets so install.ps1 can offer them one by one.
-          foreach ($m in Get-ChildItem windows/models/*.onnx) {
-            Copy-Item $m.FullName .
-            $mh = (Get-FileHash $m.FullName -Algorithm SHA256).Hash.ToLower()
-            "$mh  $($m.Name)" | Tee-Object "$($m.Name).sha256"
-          }
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/')
@@ -72,7 +66,5 @@ jobs:
           files: |
             Sordino-windows.zip
             Sordino-windows.zip.sha256
-            dpdfnet*_48khz_hr.onnx
-            dpdfnet*_48khz_hr.onnx.sha256
           generate_release_notes: true
 

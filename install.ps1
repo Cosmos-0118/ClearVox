@@ -23,6 +23,10 @@ $StartMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Sordi
 $CableUrl = 'https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack46.zip'
 $CableSha256 = 'BC44E8974191A5A2427D6C979E2DAB08DBB09925F3F435DFA2F0BA3E45B6EB90'
 
+# Voice models are published once under their own release (models.yml), not with every app release.
+# Bump this when new or changed models are published (models-v2, ...).
+$ModelsTag = 'models-v1'
+
 function Step($m) { Write-Host "`n==> $m" -ForegroundColor White }
 function Ok($m)   { Write-Host "[ok] $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "[!] $m" -ForegroundColor Yellow }
@@ -114,6 +118,7 @@ try {
         @{ Id = 'dpdfnet2'; File = 'dpdfnet2_48khz_hr.onnx'; Name = 'DPDFNet-2'; Note = 'lighter on CPU, slightly less clean'; MB = 10 }
     )
     $ModelDir = Join-Path $InstallDir 'models'
+    $modelsBase = "https://github.com/$Repo/releases/download/$ModelsTag"
     $have = @($Catalog | Where-Object { Test-Path (Join-Path $ModelDir $_.File) } | ForEach-Object { $_.Id })
 
     # Selection: SORDINO_MODELS="dpdfnet8,dpdfnet2" | "all" | "none" skips the prompt (for scripts/CI).
@@ -154,8 +159,8 @@ try {
                 Copy-Item (Join-Path $here ('windows\models\' + $m.File)) $dest -Force
             } else {
                 Write-Host "Downloading $($m.Name) (~$($m.MB) MB) ..."
-                Invoke-WebRequest -Uri "$base/$($m.File)" -OutFile $dest -UseBasicParsing
-                $expected = Get-ExpectedSha256 "$base/$($m.File).sha256"
+                Invoke-WebRequest -Uri "$modelsBase/$($m.File)" -OutFile $dest -UseBasicParsing
+                $expected = Get-ExpectedSha256 "$modelsBase/$($m.File).sha256"
                 if (-not $expected) { throw 'no checksum published' }
                 if ((Get-FileHash $dest -Algorithm SHA256).Hash.ToUpper() -ne $expected) { throw 'checksum mismatch' }
             }

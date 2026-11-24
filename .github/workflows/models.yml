@@ -1,0 +1,37 @@
+name: Models
+
+# Publishes the DPDFNet voice models once, under a models-vN tag (e.g. models-v1), instead of
+# re-uploading ~25 MB with every app release. install.ps1 downloads them from the pinned tag.
+# To ship new or changed models: update windows/models, bump the tag (models-v2) and ModelsTag in install.ps1.
+on:
+  push:
+    tags: ["models-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  models:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checksums
+        working-directory: windows/models
+        run: |
+          for f in *.onnx; do sha256sum "$f" | tee "$f.sha256"; done
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Voice models (${{ github.ref_name }})
+          body: |
+            DPDFNet voice models (Apache-2.0, see `windows/models/LICENSE-DPDFNet.txt`), published once and
+            downloaded by `install.ps1`. Not an app release: get Sordino from the latest `v*` release.
+          make_latest: false
+          files: |
+            windows/models/*.onnx
+            windows/models/*.onnx.sha256
+            windows/models/LICENSE-DPDFNet.txt
