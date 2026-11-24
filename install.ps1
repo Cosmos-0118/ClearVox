@@ -39,6 +39,31 @@ function Get-ExpectedSha256($url) {
     return (([string]$c).TrimStart([char]0xFEFF) -split '\s+' | Where-Object { $_ } | Select-Object -First 1).Trim().ToUpper()
 }
 
+# Stops every running Sordino (the tray app has no window to close, so it is ended) and waits until
+# the process is really gone so its exe is no longer locked. Returns $false if one refuses to exit.
+function Stop-Sordino {
+    if (-not (Get-Process sordino -ErrorAction SilentlyContinue)) { return $true }
+    Write-Host 'Closing the running Sordino ...'
+    for ($i = 0; $i -lt 3; $i++) {
+        Get-Process sordino -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        for ($j = 0; $j -lt 25; $j++) {
+            if (-not (Get-Process sordino -ErrorAction SilentlyContinue)) { return $true }
+            Start-Sleep -Milliseconds 200
+        }
+    }
+    return -not (Get-Process sordino -ErrorAction SilentlyContinue)
+}
+# Deletes a path, retrying while antivirus or a dying process still holds it. Returns $true when it is gone.
+function Remove-Retry($path) {
+    for ($i = 0; $i -lt 15; $i++) {
+        if (-not (Test-Path $path)) { return $true }
+        Remove-Item $path -Recurse -Force -ErrorAction SilentlyContinue
+        if (-not (Test-Path $path)) { return $true }
+        Start-Sleep -Milliseconds 400
+    }
+    return -not (Test-Path $path)
+}
+
 Write-Host 'Sordino installer' -ForegroundColor White
 Write-Host 'Cleaner voice for Discord, WhatsApp, Zoom and games.' -ForegroundColor DarkGray
 
@@ -174,13 +199,20 @@ try {
 
     # ---------- 3. install ----------
     Step 'Installing'
-    Get-Process sordino -ErrorAction SilentlyContinue | ForEach-Object {
-        Write-Host 'Closing the running Sordino ...'
-        $_.CloseMainWindow() | Out-Null
-        if (-not $_.WaitForExit(2000)) { Stop-Process -Id $_.Id -Force }
-    }
+    if (-not (Stop-Sordino)) { Die 'The running Sordino would not close. Quit it from the tray icon (right-click > Quit) and run the installer again.' }
     New-Item -ItemType Directory -Force $InstallDir | Out-Null
-    Copy-Item $localExe (Join-Path $InstallDir 'sordino.exe') -Force
+    $installedExe = Join-Path $InstallDir 'sordino.exe'
+    # Remove the previous version completely. If it was killed while the virtual mic was the Windows
+    # default, hand the default back to the real microphone first (a no-op otherwise).
+    if (Test-Path $installedExe) {
+        try { & $installedExe --restore-default 2>&1 | Out-Null } catch { }
+        if (-not (Remove-Retry $installedExe)) { Die "Couldn't remove the old $installedExe (locked by another program). Close it, or restart Windows, then run the installer again." }
+        Ok 'Previous version removed.'
+    }
+    # Leftovers of earlier layouts (anything but the exe and the models folder is ours to replace).
+    Get-ChildItem $InstallDir -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'models' } | ForEach-Object { [void](Remove-Retry $_.FullName) }
+    Copy-Item $localExe $installedExe -Force
+    if ((Get-FileHash $localExe -Algorithm SHA256).Hash -ne (Get-FileHash $installedExe -Algorithm SHA256).Hash) { Die 'The installed sordino.exe does not match the download.' }
     $newModels = @(Get-ChildItem $stageModels -Filter *.onnx -ErrorAction SilentlyContinue)
     if ($newModels.Count -gt 0) {
         New-Item -ItemType Directory -Force $ModelDir | Out-Null
@@ -191,13 +223,13 @@ try {
     $shell = New-Object -ComObject WScript.Shell
     New-Item -ItemType Directory -Force (Split-Path $StartMenu) | Out-Null
     $lnk = $shell.CreateShortcut($StartMenu)
-    $lnk.TargetPath = Join-Path $InstallDir 'sordino.exe'
+    $lnk.TargetPath = $installedExe
     $lnk.WorkingDirectory = $InstallDir
     $lnk.Description = 'Sordino - clean voice for chat apps'
     $lnk.Save()
     Ok 'Start Menu shortcut created.'
 
-    Start-Process (Join-Path $InstallDir 'sordino.exe')
+    Start-Process $installedExe
     Write-Host ''
     Write-Host 'Sordino is running in the system tray (bottom-right, maybe under the ^ arrow).' -ForegroundColor Green
     Write-Host 'In Discord / WhatsApp / Zoom, choose "CABLE Output (VB-Audio Virtual Cable)" as the microphone.'
